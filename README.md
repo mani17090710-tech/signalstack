@@ -57,9 +57,8 @@ check **Admin dashboard → Monitored sources** afterward to confirm each one sh
 
 Uses a small built-in SMTP client (`mailer.js`) — no npm packages required. Configure
 `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` (see `.env.example` for Gmail and
-SendGrid examples). Set `APP_URL` to the public app URL so password-reset links point
-to the deployed site. Without SMTP configured, email alerts and password-reset emails
-fail gracefully; in-app and browser-tab notifications still work.
+SendGrid examples). Without SMTP configured, email alerts fail gracefully; in-app and
+browser-tab notifications still work.
 
 **Note on testing:** I verified the client fails safely when unconfigured, but I
 couldn't send a real email from this environment either (same network restriction).
@@ -122,7 +121,7 @@ Dockerfile          Container build
 All `/api/*` routes except `/api/signup`, `/api/login`, `/api/logout` require a
 session cookie. `/api/admin/*` additionally requires the `admin` role.
 
-`POST /api/forgot-password`, `/api/reset-password` · `GET /api/models`, `/api/models/:id`, `/api/benchmarks`, `/api/benchmarks/:id`,
+`GET /api/models`, `/api/models/:id`, `/api/benchmarks`, `/api/benchmarks/:id`,
 `/api/papers`, `/api/events`, `/api/orgs`, `/api/docs`, `/api/docs/diff`,
 `/api/search`, `/api/watchlist`, `/api/alerts` · `POST/DELETE /api/watchlist`,
 `/api/alerts` · `POST /api/admin/ingest/run`, `/api/admin/review`,
