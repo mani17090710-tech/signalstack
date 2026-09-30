@@ -92,7 +92,7 @@ if(p==='/api/forgot-password'&&req.method==='POST'){if(limited(ip))return send(r
 const email=String(j.email||'').trim().toLowerCase(),us=db.prepare('select id,email from users where email=?').get(email);
 if(us){const token=cr.randomBytes(32).toString('hex');db.prepare('delete from password_resets where user_id=?').run(us.id);db.prepare('insert into password_resets values(?,?,?)').run(tokenHash(token),us.id,Date.now()+3600000);
 const base=process.env.APP_URL||`http://localhost:${PORT}`,link=`${base.replace(/\/$/,'')}/?reset=${token}`;
-sendMail({to:us.email,subject:'Reset your Signalstack password',text:`We received a request to reset your Signalstack password.\n\nOpen this link within 1 hour to choose a new password:\n${link}\n\nIf you did not request this, you can ignore this email.`}).catch(()=>{});
+sendMail({to:us.email,subject:'Reset your Signalstack password',text:`We received a request to reset your Signalstack password.\n\nOpen this link within 1 hour to choose a new password:\n${link}\n\nIf you did not request this, you can ignore this email.`}).then(r=>{if(!r.ok)console.error('Password reset email failed:',r.error)}).catch(e=>console.error('Password reset email failed:',e.message));
 }
 return send(res,200,{ok:true,message:'If an account exists for that email, a password reset link is on its way.'})}
 if(p==='/api/reset-password'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
