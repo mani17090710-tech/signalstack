@@ -5,6 +5,7 @@ const PORT=process.env.PORT||3000,db=new DatabaseSync(process.env.DB||'signalsta
 db.exec(`pragma foreign_keys=on;
 create table if not exists users(id integer primary key,email text unique not null,name text,pw text not null,role text default 'user',created text default current_timestamp);
 create table if not exists sessions(token text primary key,user_id integer not null references users(id) on delete cascade,expires integer);
+create table if not exists password_resets(token_hash text primary key,user_id integer not null references users(id) on delete cascade,expires integer);
 create table if not exists orgs(id text primary key,name text);
 create table if not exists models(id text primary key,name text,org_id text references orgs(id),arch text,params text,ctx text,open integer,price text,rel text,ver text,uses text,verified integer default 1);
 create table if not exists benchmarks(id text primary key,name text,ver text,cat text,descr text,meth text);
@@ -47,6 +48,7 @@ si.run('arxiv-llm','arxiv','arXiv — recent language model papers',JSON.stringi
 // ---- helpers ----
 const hash=(pw,salt=cr.randomBytes(16).toString('hex'))=>salt+':'+cr.scryptSync(pw,salt,64).toString('hex');
 const check=(pw,h)=>{const[s,k]=h.split(':');return cr.timingSafeEqual(Buffer.from(k,'hex'),cr.scryptSync(pw,s,64))};
+const tokenHash=token=>cr.createHash('sha256').update(token).digest('hex');
 const hits={};const limited=ip=>{const n=Date.now(),a=(hits[ip]=(hits[ip]||[]).filter(t=>n-t<60000));a.push(n);return a.length>10};
 const send=(res,code,obj,h={})=>{res.writeHead(code,{'Content-Type':'application/json','X-Content-Type-Options':'nosniff',...h});res.end(JSON.stringify(obj))};
 const SEV={Normal:0,Important:1,Research:1,Major:2,Critical:3},MIN={All:0,'Major only':2,'Critical only':3};
@@ -83,6 +85,17 @@ if(p==='/api/login'&&req.method==='POST'){if(limited(ip))return send(res,429,{er
 const us=db.prepare('select * from users where email=?').get(String(j.email||'').toLowerCase());
 if(!us||!check(String(j.password||''),us.pw))return send(res,401,{error:'Email or password is incorrect.'});
 const t=cr.randomBytes(24).toString('hex');db.prepare('insert into sessions values(?,?,?)').run(t,us.id,Date.now()+6048e5);return send(res,200,{ok:true},{'Set-Cookie':ck(t)})}
+if(p==='/api/forgot-password'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
+const email=String(j.email||'').trim().toLowerCase(),us=db.prepare('select id,email from users where email=?').get(email);
+if(us){const token=cr.randomBytes(32).toString('hex');db.prepare('delete from password_resets where user_id=?').run(us.id);db.prepare('insert into password_resets values(?,?,?)').run(tokenHash(token),us.id,Date.now()+3600000);
+const base=process.env.APP_URL||`http://localhost:${PORT}`,link=`${base.replace(/\/$/,'')}/?reset=${token}`;
+sendMail({to:us.email,subject:'Reset your Signalstack password',text:`We received a request to reset your Signalstack password.\n\nOpen this link within 1 hour to choose a new password:\n${link}\n\nIf you did not request this, you can ignore this email.`}).catch(()=>{});
+}
+return send(res,200,{ok:true,message:'If an account exists for that email, a password reset link is on its way.'})}
+if(p==='/api/reset-password'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
+const token=String(j.token||''),password=String(j.password||'');if(!/^[a-f0-9]{64}$/.test(token))return send(res,400,{error:'This reset link is invalid or has expired.'});if(password.length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
+const reset=db.prepare('select user_id from password_resets where token_hash=? and expires>?').get(tokenHash(token),Date.now());if(!reset)return send(res,400,{error:'This reset link is invalid or has expired.'});
+db.prepare('update users set pw=? where id=?').run(hash(password),reset.user_id);db.prepare('delete from password_resets where user_id=?').run(reset.user_id);db.prepare('delete from sessions where user_id=?').run(reset.user_id);return send(res,200,{ok:true})}
 if(p==='/api/logout'){if(sid)db.prepare('delete from sessions where token=?').run(sid);return send(res,200,{ok:true},{'Set-Cookie':ck('')})}
 if(p==='/api/me'){if(!need())return;return send(res,200,db.prepare('select id,email,name,role from users where id=?').get(uid))}
 const isAdmin=uid&&db.prepare('select role from users where id=?').get(uid)?.role==='admin';
