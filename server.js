@@ -67,13 +67,16 @@ return{changes:out,severity:out.some(c=>c.t==='removed')?'Breaking':out.length?'
 
 http.createServer((req,res)=>{
 const u=new URL(req.url,'http://x'),p=u.pathname,q=u.searchParams,ip=req.socket.remoteAddress;
-if(!p.startsWith('/api')){const f=path.join(__dirname,'public','index.html');return fs.readFile(f,(e,d)=>{res.writeHead(e?404:200,{'Content-Type':'text/html; charset=utf-8'});res.end(e?'Not found':d)})}
+if(process.env.FORCE_HTTPS==='true'&&req.headers['x-forwarded-proto']==='http'){res.writeHead(301,{Location:`https://${req.headers.host}${req.url}`});return res.end()}
+if(p==='/robots.txt'){res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8'});return res.end('User-agent: *\nAllow: /\nSitemap: /sitemap.xml\n')}
+if(p==='/sitemap.xml'){res.writeHead(200,{'Content-Type':'application/xml; charset=utf-8'});return res.end('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>/</loc></urlset>')}
+if(!p.startsWith('/api')){if(p!=='/'&&p!=='/index.html')return send(res,404,{error:'Page not found.'});const f=path.join(__dirname,'public','index.html');return fs.readFile(f,(e,d)=>{res.writeHead(e?404:200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'});res.end(e?'Not found':d)})}
 let body='';req.on('data',c=>{body+=c;if(body.length>1e5)req.destroy()});
 req.on('end',()=>{try{
 const j=body?JSON.parse(body):{},sid=(req.headers.cookie||'').match(/sid=([a-f0-9]+)/)?.[1];
 const s=sid&&db.prepare('select user_id from sessions where token=? and expires>?').get(sid,Date.now());
 const uid=s?.user_id,need=()=>{if(!uid){send(res,401,{error:'Please log in to continue.'});return false}return true};
-const ck=t=>`sid=${t}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${t?604800:0}`;
+const ck=t=>`sid=${t}; HttpOnly; SameSite=Lax${process.env.NODE_ENV==='production'?'; Secure':''}; Path=/; Max-Age=${t?604800:0}`;
 // auth
 if(p==='/api/signup'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
 const{email,password,name}=j;if(!/^\S+@\S+\.\S+$/.test(email||''))return send(res,400,{error:'Enter a valid email address.'});if((password||'').length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
