@@ -5,6 +5,7 @@ const PORT=process.env.PORT||3000,db=new DatabaseSync(process.env.DB||'signalsta
 db.exec(`pragma foreign_keys=on;
 create table if not exists users(id integer primary key,email text unique not null,name text,pw text not null,role text default 'user',created text default current_timestamp);
 create table if not exists sessions(token text primary key,user_id integer not null references users(id) on delete cascade,expires integer);
+create table if not exists password_resets(email text primary key,code text,expires integer);
 create table if not exists orgs(id text primary key,name text);
 create table if not exists models(id text primary key,name text,org_id text references orgs(id),arch text,params text,ctx text,open integer,price text,rel text,ver text,uses text,verified integer default 1);
 create table if not exists benchmarks(id text primary key,name text,ver text,cat text,descr text,meth text);
@@ -65,16 +66,13 @@ return{changes:out,severity:out.some(c=>c.t==='removed')?'Breaking':out.length?'
 
 http.createServer((req,res)=>{
 const u=new URL(req.url,'http://x'),p=u.pathname,q=u.searchParams,ip=req.socket.remoteAddress;
-if(process.env.FORCE_HTTPS==='true'&&req.headers['x-forwarded-proto']==='http'){res.writeHead(301,{Location:`https://${req.headers.host}${req.url}`});return res.end()}
-if(p==='/robots.txt'){res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8'});return res.end('User-agent: *\nAllow: /\nSitemap: /sitemap.xml\n')}
-if(p==='/sitemap.xml'){res.writeHead(200,{'Content-Type':'application/xml; charset=utf-8'});return res.end('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>/</loc></urlset>')}
-if(!p.startsWith('/api')){if(p!=='/'&&p!=='/index.html')return send(res,404,{error:'Page not found.'});const f=path.join(__dirname,'public','index.html');return fs.readFile(f,(e,d)=>{res.writeHead(e?404:200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'});res.end(e?'Not found':d)})}
+if(!p.startsWith('/api')){const f=path.join(__dirname,'public','index.html');return fs.readFile(f,(e,d)=>{res.writeHead(e?404:200,{'Content-Type':'text/html; charset=utf-8'});res.end(e?'Not found':d)})}
 let body='';req.on('data',c=>{body+=c;if(body.length>1e5)req.destroy()});
-req.on('end',()=>{try{
+req.on('end',async()=>{try{
 const j=body?JSON.parse(body):{},sid=(req.headers.cookie||'').match(/sid=([a-f0-9]+)/)?.[1];
 const s=sid&&db.prepare('select user_id from sessions where token=? and expires>?').get(sid,Date.now());
 const uid=s?.user_id,need=()=>{if(!uid){send(res,401,{error:'Please log in to continue.'});return false}return true};
-const ck=t=>`sid=${t}; HttpOnly; SameSite=Lax${process.env.NODE_ENV==='production'?'; Secure':''}; Path=/; Max-Age=${t?604800:0}`;
+const ck=t=>`sid=${t}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${t?604800:0}`;
 // auth
 if(p==='/api/signup'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
 const{email,password,name}=j;if(!/^\S+@\S+\.\S+$/.test(email||''))return send(res,400,{error:'Enter a valid email address.'});if((password||'').length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
@@ -87,6 +85,23 @@ const us=db.prepare('select * from users where email=?').get(String(j.email||'')
 if(!us||!check(String(j.password||''),us.pw))return send(res,401,{error:'Email or password is incorrect.'});
 const t=cr.randomBytes(24).toString('hex');db.prepare('insert into sessions values(?,?,?)').run(t,us.id,Date.now()+6048e5);return send(res,200,{ok:true},{'Set-Cookie':ck(t)})}
 if(p==='/api/logout'){if(sid)db.prepare('delete from sessions where token=?').run(sid);return send(res,200,{ok:true},{'Set-Cookie':ck('')})}
+if(p==='/api/forgot-password'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
+const email=String(j.email||'').toLowerCase();const us=db.prepare('select 1 from users where email=?').get(email);
+if(us){const code=String(cr.randomInt(100000,999999));db.prepare('insert into password_resets(email,code,expires) values(?,?,?) on conflict(email) do update set code=excluded.code,expires=excluded.expires').run(email,code,Date.now()+600000);
+const r=await sendMail({to:email,subject:'Your Signalstack reset code',text:`Your password reset code is ${code}. It expires in 10 minutes. If you didn't request this, ignore this email.`});
+if(!r.ok)console.log(`[password reset] Email not sent (${r.error}). Code for ${email}: ${code}`);}
+// Always respond the same way whether or not the account exists, so this can't be used to check which emails have accounts.
+return send(res,200,{ok:true,message:'If that email has an account, a reset code has been sent.'})}
+if(p==='/api/reset-password'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
+const email=String(j.email||'').toLowerCase(),code=String(j.code||'').trim();
+const rr=db.prepare('select * from password_resets where email=?').get(email);
+if(!rr||rr.code!==code||rr.expires<Date.now())return send(res,400,{error:'That code is invalid or has expired. Request a new one.'});
+if((j.password||'').length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
+db.prepare('update users set pw=? where email=?').run(hash(j.password),email);
+db.prepare('delete from password_resets where email=?').run(email);
+const u=db.prepare('select id from users where email=?').get(email);
+db.prepare('delete from sessions where user_id=?').run(u.id); // log out any existing sessions for safety
+return send(res,200,{ok:true})}
 if(p==='/api/me'){if(!need())return;return send(res,200,db.prepare('select id,email,name,role from users where id=?').get(uid))}
 const isAdmin=uid&&db.prepare('select role from users where id=?').get(uid)?.role==='admin';
 const needAdmin=()=>{if(!need())return false;if(!isAdmin){send(res,403,{error:'This area is for admins only.'});return false}return true};
@@ -127,6 +142,14 @@ if(p==='/api/admin/pending'){if(!needAdmin())return;return send(res,200,{models:
 if(p==='/api/admin/review'&&req.method==='POST'){if(!needAdmin())return;const t=j.type==='paper'?'papers':'models';
 if(j.action==='approve')db.prepare(`update ${t} set verified=1 where id=?`).run(j.id);else db.prepare(`delete from ${t} where id=?`).run(j.id);
 return send(res,200,{ok:true})}
+if(p==='/api/admin/review/bulk'&&req.method==='POST'){if(!needAdmin())return;
+const types=j.type==='paper'?['papers']:j.type==='model'?['models']:['models','papers'];
+let count=0;
+for(const t of types){const rows=db.prepare(`select id from ${t} where verified=0`).all();
+if(j.action==='approve')db.prepare(`update ${t} set verified=1 where verified=0`).run();
+else db.prepare(`delete from ${t} where verified=0`).run();
+count+=rows.length}
+return send(res,200,{ok:true,count})}
 if(p==='/api/admin/sources'&&req.method==='POST'){if(!needAdmin())return;db.prepare('update sources_config set enabled=? where id=?').run(j.enabled?1:0,j.id);return send(res,200,{ok:true})}
 if(p==='/api/admin/ingest/run'&&req.method==='POST'){if(!needAdmin())return;
 runAll(db).then(inserted=>{const full=inserted.map(x=>db.prepare('select * from events where id=?').get(x.id));full.forEach(e=>notify(db,e).catch(()=>{}))});
