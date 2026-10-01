@@ -19,7 +19,7 @@ create table if not exists sources_config(id text primary key,kind text,label te
 create table if not exists ingestion_log(id integer primary key,source_id text references sources_config(id),ts text,status text,message text,items integer);
 create table if not exists notification_log(id integer primary key,user_id integer references users(id) on delete cascade,channel text,status text,error text,ts text default current_timestamp);
 create index if not exists ix_res on results(model_id,bench_id);create index if not exists ix_ev on events(ts);create index if not exists ix_ses on sessions(user_id);create index if not exists ix_log on ingestion_log(ts);`);
-
+ 
 // ---- DEMO seed data (fictional). Replace with ingestion jobs for live data. ----
 if(!db.prepare('select 1 from orgs').get()){
 const ins=(t,rows)=>rows.forEach(r=>db.prepare(`insert into ${t} values(${r.map(()=>'?').join(',')})`).run(...r));
@@ -44,7 +44,7 @@ si.run('hf-new-models','huggingface','Hugging Face — newest models',JSON.strin
 si.run('gh-transformers','github','GitHub — huggingface/transformers releases',JSON.stringify({owner:'huggingface',repo:'transformers'}));
 si.run('arxiv-llm','arxiv','arXiv — recent language model papers',JSON.stringify({query:'cat:cs.CL AND abs:language model',max:10}));
 }
-
+ 
 // ---- helpers ----
 const hash=(pw,salt=cr.randomBytes(16).toString('hex'))=>salt+':'+cr.scryptSync(pw,salt,64).toString('hex');
 const check=(pw,h)=>{const[s,k]=h.split(':');return cr.timingSafeEqual(Buffer.from(k,'hex'),cr.scryptSync(pw,s,64))};
@@ -63,7 +63,7 @@ function diff(a,b){const A=a.split(';;'),B=b.split(';;'),k=x=>x.split(':')[0],ak
 B.forEach(l=>{if(!ak.includes(k(l)))out.push({t:'added',text:l});else{const o=A.find(x=>k(x)===k(l));if(o!==l)out.push({t:'changed',text:o+' -> '+l})}});
 A.forEach(l=>{if(!bk.includes(k(l)))out.push({t:'removed',text:l})});
 return{changes:out,severity:out.some(c=>c.t==='removed')?'Breaking':out.length?'Important':'Informational'}}
-
+ 
 http.createServer((req,res)=>{
 const u=new URL(req.url,'http://x'),p=u.pathname,q=u.searchParams,ip=req.socket.remoteAddress;
 if(!p.startsWith('/api')){const f=path.join(__dirname,'public','index.html');return fs.readFile(f,(e,d)=>{res.writeHead(e?404:200,{'Content-Type':'text/html; charset=utf-8'});res.end(e?'Not found':d)})}
@@ -75,25 +75,26 @@ const uid=s?.user_id,need=()=>{if(!uid){send(res,401,{error:'Please log in to co
 const ck=t=>`sid=${t}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${t?604800:0}`;
 // auth
 if(p==='/api/signup'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
-const{email,password,name}=j;if(!/^\S+@\S+\.\S+$/.test(email||''))return send(res,400,{error:'Enter a valid email address.'});if((password||'').length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
-if(db.prepare('select 1 from users where email=?').get(email.toLowerCase()))return send(res,409,{error:'An account with this email already exists. Try logging in.'});
+const email=String(j.email||'').trim().toLowerCase(),password=j.password,name=j.name;if(!/^\S+@\S+\.\S+$/.test(email))return send(res,400,{error:'Enter a valid email address.'});if((password||'').length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
+if(db.prepare('select 1 from users where email=?').get(email))return send(res,409,{error:'An account with this email already exists. Try logging in.'});
 const role=db.prepare('select count(*) c from users').get().c===0?'admin':'user';
-const r=db.prepare('insert into users(email,name,pw,role) values(?,?,?,?)').run(email.toLowerCase(),String(name||'').slice(0,60),hash(password),role);
+const r=db.prepare('insert into users(email,name,pw,role) values(?,?,?,?)').run(email,String(name||'').slice(0,60),hash(password),role);
 const t=cr.randomBytes(24).toString('hex');db.prepare('insert into sessions values(?,?,?)').run(t,r.lastInsertRowid,Date.now()+6048e5);return send(res,201,{ok:true},{'Set-Cookie':ck(t)})}
 if(p==='/api/login'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
-const us=db.prepare('select * from users where email=?').get(String(j.email||'').toLowerCase());
+const us=db.prepare('select * from users where email=?').get(String(j.email||'').trim().toLowerCase());
 if(!us||!check(String(j.password||''),us.pw))return send(res,401,{error:'Email or password is incorrect.'});
 const t=cr.randomBytes(24).toString('hex');db.prepare('insert into sessions values(?,?,?)').run(t,us.id,Date.now()+6048e5);return send(res,200,{ok:true},{'Set-Cookie':ck(t)})}
 if(p==='/api/logout'){if(sid)db.prepare('delete from sessions where token=?').run(sid);return send(res,200,{ok:true},{'Set-Cookie':ck('')})}
 if(p==='/api/forgot-password'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
-const email=String(j.email||'').toLowerCase();const us=db.prepare('select 1 from users where email=?').get(email);
+const email=String(j.email||'').trim().toLowerCase();const us=db.prepare('select 1 from users where email=?').get(email);
 if(us){const code=String(cr.randomInt(100000,999999));db.prepare('insert into password_resets(email,code,expires) values(?,?,?) on conflict(email) do update set code=excluded.code,expires=excluded.expires').run(email,code,Date.now()+600000);
 const r=await sendMail({to:email,subject:'Your Signalstack reset code',text:`Your password reset code is ${code}. It expires in 10 minutes. If you didn't request this, ignore this email.`});
-if(!r.ok)console.log(`[password reset] Email not sent (${r.error}). Code for ${email}: ${code}`);}
+if(r.ok)console.log(`[password reset] Email send reported success to ${email}. Code was: ${code}`);
+else console.log(`[password reset] Email not sent (${r.error}). Code for ${email}: ${code}`);}
 // Always respond the same way whether or not the account exists, so this can't be used to check which emails have accounts.
 return send(res,200,{ok:true,message:'If that email has an account, a reset code has been sent.'})}
 if(p==='/api/reset-password'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
-const email=String(j.email||'').toLowerCase(),code=String(j.code||'').trim();
+const email=String(j.email||'').trim().toLowerCase(),code=String(j.code||'').trim();
 const rr=db.prepare('select * from password_resets where email=?').get(email);
 if(!rr||rr.code!==code||rr.expires<Date.now())return send(res,400,{error:'That code is invalid or has expired. Request a new one.'});
 if((j.password||'').length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
@@ -156,9 +157,12 @@ runAll(db).then(inserted=>{const full=inserted.map(x=>db.prepare('select * from 
 return send(res,202,{ok:true,message:'Ingestion started. Refresh the admin page in a few seconds for results.'})}
 if(p==='/api/admin/users'){if(!needAdmin())return;return send(res,200,db.prepare('select id,email,name,role,created from users order by id').all())}
 if(p==='/api/admin/users/role'&&req.method==='POST'){if(!needAdmin())return;db.prepare('update users set role=? where id=?').run(j.role==='admin'?'admin':'user',j.id);return send(res,200,{ok:true})}
+if(p==='/api/admin/test-email'&&req.method==='POST'){if(!needAdmin())return;
+const r=await sendMail({to:j.to,subject:'Signalstack test email',text:'If you are reading this, your SMTP settings are working correctly.'});
+return send(res,r.ok?200:500,r)}
 send(res,404,{error:'Endpoint not found.'})}catch(e){console.error(e);send(res,500,{error:'Something went wrong on our side. Try again shortly.'})}})}).listen(PORT,()=>{console.log('Signalstack running at http://localhost:'+PORT);
 scheduleIngestion();});
-
+ 
 function scheduleIngestion(){
 const mins=Math.max(5,+process.env.INGEST_INTERVAL_MIN||30);
 const tick=async()=>{try{
@@ -171,3 +175,4 @@ setTimeout(tick,10000); // first run shortly after boot
 setInterval(tick,mins*60000);
 console.log(`Ingestion scheduled every ${mins} minute(s). Set INGEST_INTERVAL_MIN to change.`);
 }
+ 
