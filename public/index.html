@@ -112,6 +112,7 @@ V.admin=async()=>{const[s,log,pend,users]=await Promise.all([api('/admin/summary
 return`<h1 class="t">Admin dashboard</h1><p class="sub">System health, ingestion sources and review queue.</p>
 <div class="kpi">${[['Users',s.users],['Models',s.models],['Papers',s.papers],['Events',s.events],['Pending review',s.pendingModels+s.pendingPapers],['Emails sent',s.emailsSent],['Emails failed',s.emailsFailed]].map(x=>`<div class="card"><b>${x[1]}</b><span class="meta">${x[0]}</span></div>`).join('')}</div>
 ${s.emailConfigured?'':'<div class="warn">Email is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS and SMTP_FROM in the environment to enable email alerts.</div>'}
+<h3>Test email</h3><div class="row"><input id="temail" type="email" placeholder="Send a test email to..."><button id="tsend">Send test email</button></div><div id="tresult"></div>
 <h3>Monitored sources <button id="runnow">Run ingestion now</button></h3>
 <div class="card" style="padding:0">${s.sources.map(x=>`<div class="src"><div><b>${esc(x.label)}</b><div class="meta">${esc(x.kind)} · last run: ${x.last_run?esc(x.last_run):'never'} · <span class="${x.last_status==='error'?'errtxt':'ok'}">${esc(x.last_status||'—')}</span>${x.last_error?' — '+esc(x.last_error):''}</div></div><button data-src="${x.id}" data-on="${x.enabled?'0':'1'}">${x.enabled?'Disable':'Enable'}</button></div>`).join('')}</div>
 <h3>Pending review</h3><div class="two">
@@ -136,6 +137,10 @@ if(b.dataset.bulkact==='reject'&&!confirm('Reject and permanently delete all pen
 await api('/admin/review/bulk','POST',{type:b.dataset.bulk,action:b.dataset.bulkact});route()});
 document.querySelectorAll('[data-src]').forEach(b=>b.onclick=async()=>{await api('/admin/sources','POST',{id:b.dataset.src,enabled:b.dataset.on==='1'});route()});
 const run=$('#runnow');if(run)run.onclick=async()=>{run.textContent='Running…';run.disabled=true;await api('/admin/ingest/run','POST');setTimeout(route,3000)};
+const tsend=$('#tsend');if(tsend)tsend.onclick=async()=>{const to=$('#temail').value;if(!to)return;tsend.disabled=true;tsend.textContent='Sending…';
+try{const r=await api('/admin/test-email','POST',{to});$('#tresult').innerHTML=`<div class="note">Sent successfully. Check ${esc(to)}'s inbox (and spam folder).</div>`}
+catch(e){$('#tresult').innerHTML=`<div class="warn">Failed: ${esc(e.message)}</div>`}
+tsend.disabled=false;tsend.textContent='Send test email'};
 const prole=$('#prole');if(prole)prole.onclick=async e=>{if(e.target.dataset.role){await api('/admin/users/role','POST',{id:+e.target.dataset.id,role:e.target.dataset.role});route()}}}
 async function boot(){try{me=await api('/me');watch=await api('/watchlist');shell();route()}catch(e){authView()}}
 addEventListener('hashchange',()=>me&&route());boot();
