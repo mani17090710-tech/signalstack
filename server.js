@@ -21,7 +21,7 @@ create table if not exists notification_log(id integer primary key,user_id integ
 create index if not exists ix_res on results(model_id,bench_id);create index if not exists ix_ev on events(ts);create index if not exists ix_ses on sessions(user_id);create index if not exists ix_log on ingestion_log(ts);`);
  
 // ---- DEMO seed data (fictional). Replace with ingestion jobs for live data. ----
-if(!db.prepare('select 1 from orgs').get()){
+if(process.env.SEED_DEMO==='true'&&!db.prepare('select 1 from orgs').get()){
 const ins=(t,rows)=>rows.forEach(r=>db.prepare(`insert into ${t} values(${r.map(()=>'?').join(',')})`).run(...r));
 ins('orgs',[['na','Northwind AI'],['al','Aster Labs'],['ko','Kestrel Open']]);
 ins('models',[
@@ -38,7 +38,14 @@ ins('events',[[null,'Critical','2026-09-28 09:12','ko','kestrel-moe','Model Rele
 ins('doc_versions',[['v4.1','2026-09-10','temperature: 0-2;;timeout default: 30s;;legacy_stream: supported'],['v4.2','2026-09-20','temperature: 0-2;;timeout default: 60s;;legacy_stream: supported'],['v4.3','2026-09-26','temperature: 0-2;;timeout default: 120s;;reasoning_effort: low|medium|high']]);
 }
 if(!db.prepare('select 1 from orgs where id=?').get('ext'))db.prepare("insert into orgs values('ext','External / Unverified')").run();
-if(!db.prepare('select 1 from sources_config').get()){
+if(process.env.SEED_DEMO!=='true'){try{db.exec(`delete from results where source like 'demo://%';
+delete from events where source like 'demo://%';
+delete from papers where url like 'demo://%';
+delete from models where id in ('meridian-3','meridian-mini','aster-r2','kestrel-70b','kestrel-moe','aster-long');
+delete from benchmarks where id in ('codeeval-v3','codeeval-v2','reasonbench','mathset');
+delete from doc_versions where version in ('v4.1','v4.2','v4.3');
+delete from orgs where id in ('na','al','ko');`)}catch(e){console.error('Demo cleanup failed:',e.message)}}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
+ if(!db.prepare('select 1 from sources_config').get()){
 const si=db.prepare('insert into sources_config(id,kind,label,config,enabled) values(?,?,?,?,1)');
 si.run('hf-new-models','huggingface','Hugging Face — newest models',JSON.stringify({url:'https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20'}));
 si.run('gh-transformers','github','GitHub — huggingface/transformers releases',JSON.stringify({owner:'huggingface',repo:'transformers'}));
