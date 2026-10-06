@@ -2,6 +2,8 @@
 const {DatabaseSync}=require('node:sqlite'),http=require('http'),fs=require('fs'),path=require('path'),cr=require('crypto');
 const {sendMail}=require('./mailer.js'),{runAll}=require('./ingest.js');
 const PORT=process.env.PORT||3000,db=new DatabaseSync(process.env.DB||'signalstack.db');
+// Version/date of the Terms + Privacy Policy. Bump this when you change them materially; it is shown on both pages and recorded at signup.
+const LEGAL_VERSION=process.env.LEGAL_VERSION||'2026-10-06';
 db.exec(`pragma foreign_keys=on;
 create table if not exists users(id integer primary key,email text unique not null,name text,pw text not null,role text default 'user',created text default current_timestamp);
 create table if not exists sessions(token text primary key,user_id integer not null references users(id) on delete cascade,expires integer);
@@ -19,6 +21,8 @@ create table if not exists sources_config(id text primary key,kind text,label te
 create table if not exists ingestion_log(id integer primary key,source_id text references sources_config(id),ts text,status text,message text,items integer);
 create table if not exists notification_log(id integer primary key,user_id integer references users(id) on delete cascade,channel text,status text,error text,ts text default current_timestamp);
 create index if not exists ix_res on results(model_id,bench_id);create index if not exists ix_ev on events(ts);create index if not exists ix_ses on sessions(user_id);create index if not exists ix_log on ingestion_log(ts);`);
+// Record when each user accepted the Terms/Privacy Policy (added in a later version, so migrate older databases).
+for(const c of ['accepted_at text','accepted_version text']){try{db.exec('alter table users add column '+c)}catch(e){if(!/duplicate column/i.test(e.message))throw e}}
  
 // ---- DEMO seed data (fictional). Replace with ingestion jobs for live data. ----
 if(process.env.SEED_DEMO==='true'&&!db.prepare('select 1 from orgs').get()){
@@ -73,6 +77,11 @@ return{changes:out,severity:out.some(c=>c.t==='removed')?'Breaking':out.length?'
  
 http.createServer((req,res)=>{
 const u=new URL(req.url,'http://x'),p=u.pathname,q=u.searchParams,ip=req.socket.remoteAddress;
+const legal=p.replace(/\.html$/,'').replace(/\/$/,'');
+if(legal==='/privacy'||legal==='/terms'){return fs.readFile(path.join(__dirname,'public',legal.slice(1)+'.html'),'utf8',(e,d)=>{if(e){res.writeHead(404,{'Content-Type':'text/plain'});return res.end('Not found')}
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const v={OPERATOR_NAME:process.env.OPERATOR_NAME||'[set OPERATOR_NAME]',CONTACT_EMAIL:process.env.CONTACT_EMAIL||'[set CONTACT_EMAIL]',JURISDICTION:process.env.JURISDICTION||'[set JURISDICTION]',UPDATED:LEGAL_VERSION};
+res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(d.replace(/\{\{(\w+)\}\}/g,(m,k)=>k in v?esc(v[k]):m))})}
 if(!p.startsWith('/api')){const f=path.join(__dirname,'public','index.html');return fs.readFile(f,(e,d)=>{res.writeHead(e?404:200,{'Content-Type':'text/html; charset=utf-8'});res.end(e?'Not found':d)})}
 let body='';req.on('data',c=>{body+=c;if(body.length>1e5)req.destroy()});
 req.on('end',async()=>{try{
@@ -83,9 +92,10 @@ const ck=t=>`sid=${t}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${t?604800:0}`;
 // auth
 if(p==='/api/signup'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
 const email=String(j.email||'').trim().toLowerCase(),password=j.password,name=j.name;if(!/^\S+@\S+\.\S+$/.test(email))return send(res,400,{error:'Enter a valid email address.'});if((password||'').length<8)return send(res,400,{error:'Password must be at least 8 characters.'});
+if(j.accept!==true)return send(res,400,{error:'You must accept the Terms & Conditions and Privacy Policy to create an account.'});
 if(db.prepare('select 1 from users where email=?').get(email))return send(res,409,{error:'An account with this email already exists. Try logging in.'});
 const role=db.prepare('select count(*) c from users').get().c===0?'admin':'user';
-const r=db.prepare('insert into users(email,name,pw,role) values(?,?,?,?)').run(email,String(name||'').slice(0,60),hash(password),role);
+const r=db.prepare('insert into users(email,name,pw,role,accepted_at,accepted_version) values(?,?,?,?,?,?)').run(email,String(name||'').slice(0,60),hash(password),role,new Date().toISOString(),LEGAL_VERSION);
 const t=cr.randomBytes(24).toString('hex');db.prepare('insert into sessions values(?,?,?)').run(t,r.lastInsertRowid,Date.now()+6048e5);return send(res,201,{ok:true},{'Set-Cookie':ck(t)})}
 if(p==='/api/login'&&req.method==='POST'){if(limited(ip))return send(res,429,{error:'Too many attempts. Wait a minute and try again.'});
 const us=db.prepare('select * from users where email=?').get(String(j.email||'').trim().toLowerCase());
