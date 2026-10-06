@@ -41,10 +41,13 @@ h1.t{font-size:26px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 18px}h3{marg
 <script>
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(p,method='GET',body){const r=await fetch('/api'+p,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const d=await r.json().catch(()=>({}));if(!r.ok){const e=Error(d.error||'Request failed');e.code=r.status;throw e}return d}
-let me=null,watch=[],mode='login',resetEmail='';
+let me=null,watch=[],mode='login',resetEmail='',inAuth=false;
+const PRIV=['watchlist','alerts','admin'];
+function openAuth(m){mode=m;authView()}
+const gate=()=>`<div class="card"><h1 class="t">Log in to continue</h1><p class="sub">Create a free account or log in to follow models and set alerts.</p><div class="row" style="margin:0"><button class="p" onclick="openAuth('login')">Log in</button><button onclick="openAuth('signup')">Sign up</button></div></div>`;
 const pill=(t,c=t)=>`<span class="pill ${esc(c)}">${esc(t)}</span>`,fail=e=>`<div class="card"><b>Couldn't load this page.</b><p>${esc(e.message)} Check that the server is running, then <a onclick="route()">try again</a>.</p></div>`;
 // ---- auth ----
-function authView(msg=''){const titles={login:'Log in',signup:'Create your account',forgot:'Reset your password',reset:'Enter your reset code'};
+function authView(msg=''){inAuth=true;const titles={login:'Log in',signup:'Create your account',forgot:'Reset your password',reset:'Enter your reset code'};
 $('#root').innerHTML=`<div id="auth"><div class="hero"><b style="font-size:20px">Signalstack</b><h1>Know what changed in AI before your team asks.</h1><p>One place for models, benchmarks, papers and documentation changes, with the source next to every number.</p><ul><li>Every score shows who measured it</li><li>Docs diffs between any two versions</li><li>Alerts that only fire on what matters</li></ul></div>
 <div class="form"><form id="af"><h2>${titles[mode]}</h2>
 ${mode==='signup'?'<input name="name" placeholder="Your name" autocomplete="name">':''}
@@ -59,9 +62,11 @@ ${mode==='signup'?'<label style="display:flex;gap:8px;align-items:flex-start;fon
 ${mode==='login'?'<button type="button" class="g" id="fp">Forgot password?</button>':''}
 <button type="button" class="g" id="sw">${{login:'New here? Create an account',signup:'Already have an account? Log in',forgot:'Back to log in',reset:'Back to log in'}[mode]}</button>
 <p class="meta" style="text-align:center;margin:4px 0 0"><a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
+<button type="button" class="g" id="bk">← Back to the app</button>
 </form></div></div>`;
 $('#sw').onclick=()=>{mode=mode==='signup'?'login':mode==='login'?'signup':'login';authView()};
 const fp=$('#fp');if(fp)fp.onclick=()=>{mode='forgot';authView()};
+$('#bk').onclick=()=>{inAuth=false;shell();route()};
 $('#af').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
 try{
 if(mode==='forgot'){const r=await api('/forgot-password','POST',f);resetEmail=f.email;mode='reset';authView(r.message)}
@@ -70,11 +75,12 @@ else{if(mode==='signup')f.accept=f.accept==='on';await api('/'+mode,'POST',f);bo
 }catch(x){$('#er').textContent=x.message}}}
 // ---- shell ----
 const NAV=[['Main',[['overview','Overview'],['models','Models'],['benchmarks','Benchmarks'],['research','Research'],['live','Live changes'],['docs','Documentation']]],['Tools',[['compare','Compare models']]],['You',[['watchlist','Watchlist'],['alerts','Alerts']]]];
-function navFor(){return me.role==='admin'?[...NAV,['Admin',[['admin','Admin dashboard']]]]:NAV}
-function shell(){$('#root').innerHTML=`<div id="app"><aside id="sd"></aside><div><div class="top"><button id="menu">Menu</button><form id="sf"><input id="sq" type="search" placeholder="Search models, benchmarks, papers, events" aria-label="Search"><button class="p">Search</button></form><span class="u">${esc(me.name||me.email)}${me.role==='admin'?' · admin':''}</span><button id="lo">Log out</button></div><main id="main"></main></div></div>`;
+function navFor(){if(!me)return NAV.filter(g=>g[0]!=='You');return me.role==='admin'?[...NAV,['Admin',[['admin','Admin dashboard']]]]:NAV}
+function shell(){inAuth=false;$('#root').innerHTML=`<div id="app"><aside id="sd"></aside><div><div class="top"><button id="menu">Menu</button><form id="sf"><input id="sq" type="search" placeholder="Search models, benchmarks, papers, events" aria-label="Search"><button class="p">Search</button></form>${me?`<span class="u">${esc(me.name||me.email)}${me.role==='admin'?' · admin':''}</span><button id="lo">Log out</button>`:`<span class="u"></span><button id="li">Log in</button><button class="p" id="su">Sign up</button>`}</div><main id="main"></main></div></div>`;
 $('#menu').onclick=()=>$('#sd').classList.toggle('o');$('#sf').onsubmit=e=>{e.preventDefault();location.hash='search/'+encodeURIComponent($('#sq').value)};
-$('#lo').onclick=async()=>{await api('/logout');me=null;authView()};
-if('Notification' in window && Notification.permission==='default')setTimeout(()=>Notification.requestPermission(),1200);
+if(me)$('#lo').onclick=async()=>{await api('/logout');me=null;watch=[];shell();route()};
+else{$('#li').onclick=()=>openAuth('login');$('#su').onclick=()=>openAuth('signup')}
+if(me&&'Notification' in window && Notification.permission==='default')setTimeout(()=>Notification.requestPermission(),1200);
 if(!window._poll)window._poll=setInterval(pollAlerts,60000)}
 async function pollAlerts(){if(!me||!('Notification' in window)||Notification.permission!=='granted')return;
 try{const d=await api('/alerts');const seen=+(localStorage.getItem('ss_seen')||0);const fresh=d.matches.filter(e=>e.id>seen);
@@ -126,9 +132,10 @@ ${s.emailConfigured?'':'<div class="warn">Email is not configured. Set SMTP_HOST
 async function route(){const[r,a]=(location.hash.slice(1)||'overview').split('/'),on=r==='model'?'models':r==='search'?'':r;
 $('#sd').innerHTML='<b>Signalstack</b>'+navFor().map(([h,l])=>`<small>${h}</small>`+l.map(([k,n])=>`<a href="#${k}" class="${k===on?'on':''}">${n}</a>`).join('')).join('');$('#sd').classList.remove('o');
 $('#main').innerHTML='<div class="card"><div style="height:14px;background:#eef1ec;border-radius:6px;width:40%"></div><div style="height:14px;background:#eef1ec;border-radius:6px;margin-top:12px"></div><div style="height:14px;background:#eef1ec;border-radius:6px;margin-top:12px;width:70%"></div></div>';
-try{$('#main').innerHTML=V[r]?await V[r](a):'<h1 class="t">Page not found</h1><a href="#overview">Go to overview</a>';if(r==='models')mrows()}catch(e){if(e.code===401){me=null;return authView()}$('#main').innerHTML=fail(e)}
+if(!me&&PRIV.includes(r)){$('#main').innerHTML=gate();return}
+try{$('#main').innerHTML=V[r]?await V[r](a):'<h1 class="t">Page not found</h1><a href="#overview">Go to overview</a>';if(r==='models')mrows()}catch(e){if(e.code===401){if(me){me=null;watch=[];shell();return route()}$('#main').innerHTML=gate();return}$('#main').innerHTML=fail(e)}
 wire()}
-function wire(){document.querySelectorAll('[data-w]').forEach(b=>b.onclick=async()=>{const id=b.dataset.w;watch=await api('/watchlist',watch.includes(id)?'DELETE':'POST',{model_id:id});route()});
+function wire(){document.querySelectorAll('[data-w]').forEach(b=>b.onclick=async()=>{if(!me)return openAuth('login');const id=b.dataset.w;watch=await api('/watchlist',watch.includes(id)?'DELETE':'POST',{model_id:id});route()});
 document.querySelectorAll('[data-c]').forEach(c=>c.onchange=()=>{const s=window._c;window._c=c.checked?[...s,c.dataset.c]:s.filter(x=>x!==c.dataset.c);route()});
 document.querySelectorAll('[data-ad]').forEach(b=>b.onclick=async()=>{await api('/alerts','DELETE',{id:+b.dataset.ad});route()});
 const on=(id,f)=>{const e=$(id);if(e)e.onchange=()=>f(e.value)};on('#bs',v=>location.hash='benchmarks/'+v);on('#lo2',v=>{window._lo=v;route()});on('#ls2',v=>{window._ls=v;route()});on('#da',v=>{window._da=v;route()});on('#db',v=>{window._db=v;route()});
@@ -144,6 +151,6 @@ try{const r=await api('/admin/test-email','POST',{to});$('#tresult').innerHTML=`
 catch(e){$('#tresult').innerHTML=`<div class="warn">Failed: ${esc(e.message)}</div>`}
 tsend.disabled=false;tsend.textContent='Send test email'};
 const prole=$('#prole');if(prole)prole.onclick=async e=>{if(e.target.dataset.role){await api('/admin/users/role','POST',{id:+e.target.dataset.id,role:e.target.dataset.role});route()}}}
-async function boot(){try{me=await api('/me');watch=await api('/watchlist');shell();route()}catch(e){authView()}}
-addEventListener('hashchange',()=>me&&route());boot();
+async function boot(){me=null;watch=[];try{me=await api('/me')}catch(e){}if(me){try{watch=await api('/watchlist')}catch(e){}}shell();route()}
+addEventListener('hashchange',()=>{if(!inAuth)route()});boot();
 </script></body></html>

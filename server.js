@@ -64,6 +64,8 @@ const send=(res,code,obj,h={})=>{res.writeHead(code,{'Content-Type':'application
 const SEV={Normal:0,Important:1,Research:1,Major:2,Critical:3},MIN={All:0,'Major only':2,'Critical only':3};
 const shape=m=>({...m,open:!!m.open,verified:!!m.verified,uses:m.uses?m.uses.split(',').filter(Boolean):[]});
 const M='select m.*,o.name org from models m join orgs o on o.id=m.org_id';
+// SQL filter for events (alias e): hide events about models/papers an admin has not approved yet.
+const EV_OK="(e.model_id is null or e.model_id in (select id from models where verified=1)) and not exists(select 1 from papers pp where pp.url=e.source and pp.verified=0)";
 async function notify(db,event){
 const al=db.prepare(`select a.*,u.email,u.name from alerts a join users u on u.id=a.user_id where a.channel like '%email%' and (a.org_id is null or a.org_id=?) and (a.cat is null or a.cat=?)`).all(event.org_id,event.cat);
 for(const a of al){if(SEV[event.sev]<MIN[a.minsev])continue;
@@ -123,28 +125,28 @@ return send(res,200,{ok:true})}
 if(p==='/api/me'){if(!need())return;return send(res,200,db.prepare('select id,email,name,role from users where id=?').get(uid))}
 const isAdmin=uid&&db.prepare('select role from users where id=?').get(uid)?.role==='admin';
 const needAdmin=()=>{if(!need())return false;if(!isAdmin){send(res,403,{error:'This area is for admins only.'});return false}return true};
-// data (login required)
-if(!need())return;
-if(p==='/api/models')return send(res,200,db.prepare(M+' order by m.rel desc').all().map(shape));
+// data (public, read-only: anyone can browse; only reviewed items are shown, unreviewed ones stay admin-only)
+if(p==='/api/models')return send(res,200,db.prepare(M+' where m.verified=1 order by m.rel desc').all().map(shape));
 let m=p.match(/^\/api\/models\/([\w-]+)$/);
-if(m){const md=db.prepare(M+' where m.id=?').get(m[1]);if(!md)return send(res,404,{error:'Model not found.'});
+if(m){const md=db.prepare(M+' where m.id=? and m.verified=1').get(m[1]);if(!md)return send(res,404,{error:'Model not found.'});
 return send(res,200,{model:shape(md),results:db.prepare('select r.*,b.name bname,b.ver bver from results r join benchmarks b on b.id=r.bench_id where model_id=? order by date desc').all(m[1]),
-papers:db.prepare("select * from papers where (','||model_ids||',') like ?").all('%,'+m[1]+',%'),events:db.prepare('select * from events where model_id=? order by ts desc').all(m[1])})}
+papers:db.prepare("select * from papers where verified=1 and (','||model_ids||',') like ?").all('%,'+m[1]+',%'),events:db.prepare('select * from events where model_id=? order by ts desc').all(m[1])})}
 if(p==='/api/benchmarks')return send(res,200,db.prepare('select * from benchmarks').all());
 m=p.match(/^\/api\/benchmarks\/([\w-]+)$/);
-if(m)return send(res,200,{benchmark:db.prepare('select * from benchmarks where id=?').get(m[1]),results:db.prepare('select r.*,mo.name mname from results r join models mo on mo.id=r.model_id where bench_id=? order by score desc').all(m[1])});
-if(p==='/api/papers')return send(res,200,db.prepare('select p.*,o.name org from papers p join orgs o on o.id=p.org_id order by date desc').all().map(x=>({...x,verified:!!x.verified})));
-if(p==='/api/events'){const o=q.get('org'),sv=q.get('sev');return send(res,200,db.prepare('select e.*,o.name org,mo.name model from events e join orgs o on o.id=e.org_id left join models mo on mo.id=e.model_id where (?1 is null or e.org_id=?1) and (?2 is null or e.sev=?2) order by ts desc limit ?3').all(o,sv,Math.min(+q.get('limit')||50,100)))}
+if(m)return send(res,200,{benchmark:db.prepare('select * from benchmarks where id=?').get(m[1]),results:db.prepare('select r.*,mo.name mname from results r join models mo on mo.id=r.model_id where bench_id=? and mo.verified=1 order by score desc').all(m[1])});
+if(p==='/api/papers')return send(res,200,db.prepare('select p.*,o.name org from papers p join orgs o on o.id=p.org_id where p.verified=1 order by date desc').all().map(x=>({...x,verified:!!x.verified})));
+if(p==='/api/events'){const o=q.get('org'),sv=q.get('sev');return send(res,200,db.prepare('select e.*,o.name org,mo.name model from events e join orgs o on o.id=e.org_id left join models mo on mo.id=e.model_id where '+EV_OK+' and (?1 is null or e.org_id=?1) and (?2 is null or e.sev=?2) order by ts desc limit ?3').all(o,sv,Math.min(+q.get('limit')||50,100)))}
 if(p==='/api/orgs')return send(res,200,db.prepare('select * from orgs').all());
 if(p==='/api/docs')return send(res,200,db.prepare('select version,date from doc_versions order by date desc').all());
 if(p==='/api/docs/diff'){const a=db.prepare('select lines from doc_versions where version=?').get(q.get('a')),b=db.prepare('select lines from doc_versions where version=?').get(q.get('b'));if(!a||!b)return send(res,404,{error:'Version not found.'});return send(res,200,diff(a.lines,b.lines))}
 if(p==='/api/search'){const t=q.get('q')||'';if(t.length<2)return send(res,200,{});const l='%'+t+'%';
-return send(res,200,{models:db.prepare('select id,name from models where name like ?1 or arch like ?1 or uses like ?1').all(l),benchmarks:db.prepare('select id,name,ver from benchmarks where name like ?1 or cat like ?1').all(l),papers:db.prepare('select id,title from papers where title like ?1 or tldr like ?1 or arch like ?1').all(l),events:db.prepare('select id,summary from events where summary like ?1 or cat like ?1').all(l)})}
-// personal
+return send(res,200,{models:db.prepare('select id,name from models where verified=1 and (name like ?1 or arch like ?1 or uses like ?1)').all(l),benchmarks:db.prepare('select id,name,ver from benchmarks where name like ?1 or cat like ?1').all(l),papers:db.prepare('select id,title from papers where verified=1 and (title like ?1 or tldr like ?1 or arch like ?1)').all(l),events:db.prepare('select e.id,e.summary from events e where '+EV_OK+' and (e.summary like ?1 or e.cat like ?1)').all(l)})}
+// personal (login required)
+if(!need())return;
 if(p==='/api/watchlist'){if(req.method==='POST')db.prepare('insert or ignore into watchlist values(?,?)').run(uid,j.model_id);if(req.method==='DELETE')db.prepare('delete from watchlist where user_id=? and model_id=?').run(uid,j.model_id);return send(res,200,db.prepare('select model_id from watchlist where user_id=?').all(uid).map(r=>r.model_id))}
 if(p==='/api/alerts'){if(req.method==='POST'){if(!(j.minsev in MIN))return send(res,400,{error:'Choose a severity level.'});const ch=j.channel==='app+email'?'app+email':'app';db.prepare('insert into alerts(user_id,org_id,cat,minsev,channel) values(?,?,?,?,?)').run(uid,j.org_id||null,j.cat||null,j.minsev,ch)}
 if(req.method==='DELETE')db.prepare('delete from alerts where id=? and user_id=?').run(j.id,uid);
-const al=db.prepare('select * from alerts where user_id=?').all(uid),ev=db.prepare('select e.*,o.name org from events e join orgs o on o.id=e.org_id order by ts desc').all();
+const al=db.prepare('select * from alerts where user_id=?').all(uid),ev=db.prepare('select e.*,o.name org from events e join orgs o on o.id=e.org_id where '+EV_OK+' order by ts desc').all();
 return send(res,200,{alerts:al,matches:ev.filter(e=>al.some(a=>(!a.org_id||a.org_id===e.org_id)&&(!a.cat||a.cat===e.cat)&&SEV[e.sev]>=MIN[a.minsev]))})}
 // ---- admin ----
 if(p==='/api/admin/summary'){if(!needAdmin())return;
