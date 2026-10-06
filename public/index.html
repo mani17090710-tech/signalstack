@@ -53,10 +53,12 @@ ${mode==='reset'?`<p class="sub" style="margin:0">We sent a code to ${esc(resetE
 ${mode!=='reset'?'<input name="email" type="email" placeholder="Email" required autocomplete="email" value="'+esc(resetEmail)+'">':'<input type="hidden" name="email" value="'+esc(resetEmail)+'">'}
 ${(mode==='login'||mode==='signup')?`<input name="password" type="password" placeholder="Password (8+ characters)" required autocomplete="${mode==='login'?'current-password':'new-password'}">`:''}
 ${mode==='reset'?'<input name="password" type="password" placeholder="New password (8+ characters)" required autocomplete="new-password">':''}
+${mode==='signup'?'<label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;color:var(--mut)"><input type="checkbox" name="accept" required style="margin-top:3px;padding:0"><span>I have read and agree to the <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a> and the <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>':''}
 <div class="err" id="er">${msg?'':''}</div>${msg?`<div class="note">${esc(msg)}</div>`:''}
 <button class="p">${{login:'Log in',signup:'Sign up',forgot:'Send reset code',reset:'Reset password'}[mode]}</button>
 ${mode==='login'?'<button type="button" class="g" id="fp">Forgot password?</button>':''}
 <button type="button" class="g" id="sw">${{login:'New here? Create an account',signup:'Already have an account? Log in',forgot:'Back to log in',reset:'Back to log in'}[mode]}</button>
+<p class="meta" style="text-align:center;margin:4px 0 0"><a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
 </form></div></div>`;
 $('#sw').onclick=()=>{mode=mode==='signup'?'login':mode==='login'?'signup':'login';authView()};
 const fp=$('#fp');if(fp)fp.onclick=()=>{mode='forgot';authView()};
@@ -64,7 +66,7 @@ $('#af').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new Fo
 try{
 if(mode==='forgot'){const r=await api('/forgot-password','POST',f);resetEmail=f.email;mode='reset';authView(r.message)}
 else if(mode==='reset'){await api('/reset-password','POST',f);mode='login';resetEmail='';authView('Password updated. Log in with your new password.')}
-else{await api('/'+mode,'POST',f);boot()}
+else{if(mode==='signup')f.accept=f.accept==='on';await api('/'+mode,'POST',f);boot()}
 }catch(x){$('#er').textContent=x.message}}}
 // ---- shell ----
 const NAV=[['Main',[['overview','Overview'],['models','Models'],['benchmarks','Benchmarks'],['research','Research'],['live','Live changes'],['docs','Documentation']]],['Tools',[['compare','Compare models']]],['You',[['watchlist','Watchlist'],['alerts','Alerts']]]];
