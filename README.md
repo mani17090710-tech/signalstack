@@ -3,15 +3,22 @@
 An AI intelligence platform: models, benchmarks, research papers, and documentation
 changes in one place, with a source next to every claim.
 
-## What's real vs. demo
+## What it shows
 
-- **The app, the database, auth, and the admin dashboard are fully real** — not a mockup.
-- **The seed data** (Meridian 3, Aster R2, Kestrel — all fictional) is demo content so the
-  app isn't empty on first run. It's clearly labeled in the UI.
-- **The ingestion pipeline hits real public APIs**: Hugging Face's model listing,
-  GitHub's releases API, and arXiv's search API. New items it finds are stored as
-  **pending review** (a `verified` flag) until an admin approves them, so fictional
-  demo data and live-ingested data never get silently mixed together.
+Everything on the site is collected from real public sources, with a link back to each one.
+There is no demo data by default (set `SEED_DEMO=true` only if you want fictional sample data for
+development).
+
+- **Models:** the Hugging Face Hub. First run loads the 1,000 newest models plus the 500 most-liked
+  ones, then every new model is added each cycle. Hugging Face hosts millions of repositories, so this
+  is a live, searchable slice of it, not a full mirror. Old unpopular auto-collected models are pruned
+  after 45 days to keep the database small.
+- **Research:** recent arXiv papers in cs.CL, cs.LG, cs.AI and cs.CV (300 per category on first run, then
+  everything new each cycle).
+- **Live changes:** trending models, new releases of key open-source projects (transformers, llama.cpp,
+  vLLM, Ollama, diffusers, the OpenAI and Anthropic Python SDKs), and announcements from OpenAI, Google
+  DeepMind and the Hugging Face blog.
+- **Benchmarks / Documentation:** hidden until there is data for them (no live source is connected).
 
 ## Run it locally
 
@@ -19,8 +26,7 @@ Requires Node 22.5+ (uses the built-in `node:sqlite`, no `npm install` needed).
 
 ```bash
 cd signalstack
-cp .env.example .env      # optional — edit if you want email alerts
-node --env-file=.env server.js
+node server.js            # add env vars from the table below as needed
 ```
 
 Open `http://localhost:3000`. The **first account you sign up with becomes the admin**
@@ -29,40 +35,43 @@ dashboard).
 
 ## Ingestion
 
-Runs automatically ~10 seconds after boot, then every `INGEST_INTERVAL_MIN` minutes
-(default 30). As an admin you can also trigger it manually from **Admin dashboard →
-Run ingestion now**.
+Runs about 10 seconds after boot, then every `INGEST_INTERVAL_MIN` minutes (default 30, minimum 5).
+Admins can also trigger it from **Admin dashboard → Run ingestion now**. Sources are rows in the
+`sources_config` table (editable in the database); the admin dashboard shows each source's last run and
+any error.
 
-It fetches from three sources by default (edit `sources_config` in the database, or
-add an admin UI for it, to change these):
+- The **first run of each source is a backfill**: it fills the catalog but creates few events and sends
+  no alert emails, so a fresh deploy doesn't flood anyone.
+- Later runs stop paging as soon as a page is entirely known, so they stay cheap.
+- Items are published immediately. Set `REQUIRE_REVIEW=true` to hold new models and papers for admin
+  approval instead.
+- A failing source is logged and never affects the others.
 
-| Source | What it pulls | Auth needed |
-|---|---|---|
-| Hugging Face | Newest models | No |
-| GitHub | Releases from `huggingface/transformers` (swap the repo in `sources_config`) | No (but rate-limited to 60/hr — set `GITHUB_TOKEN` to raise it to 5,000/hr) |
-| arXiv | Recent papers matching a search query | No |
+| Variable | Purpose |
+|---|---|
+| `INGEST_INTERVAL_MIN` | Minutes between runs (default 30) |
+| `HF_TOKEN` | Optional Hugging Face token (higher rate limits) |
+| `GITHUB_TOKEN` | Optional; raises GitHub's limit from 60 to 5,000 requests/hour |
+| `RETENTION_DAYS` | How long papers are kept (default 365) |
+| `REQUIRE_REVIEW` | `true` = new items wait for admin approval |
+| `RESEND_API_KEY` / `RESEND_FROM` | Enables alert emails (see below) |
+| `OPERATOR_NAME`, `CONTACT_EMAIL`, `JURISDICTION` | Fill in the Terms and Privacy pages |
+| `DB` | SQLite path (use a persistent disk, e.g. `/data/signalstack.db`) |
 
-Each source is content-hashed, so unchanged responses are skipped rather than
-reprocessed. Failures (rate limits, outages, network errors) are logged per-source in
-the admin dashboard and don't affect the rest of the app.
+**Testing note:** the parsing, paging, de-duplication and backfill logic is tested against mock
+responses shaped like the real APIs. The sandbox this was built in could not reach the live sites, so
+check **Admin dashboard → Monitored sources** after your first deploy: every source should show `ok`.
 
-**Note on testing:** I built and unit-tested this pipeline's parsing/dedup logic
-against mock data shaped exactly like the real APIs, but I could not make live calls
-to huggingface.co / github.com / arxiv.org from the environment I built this in (no
-outbound internet access there). The first live run on your machine is the real test —
-check **Admin dashboard → Monitored sources** afterward to confirm each one shows
-`ok` rather than `error`.
+**Free hosting caveat:** free web services sleep when idle (ingestion pauses while asleep) and often
+have no persistent disk (the database resets on restart and is rebuilt by the next backfill). For
+always-fresh data use an always-on plan with a disk mounted at `/data`.
 
 ## Email alerts
 
-Uses a small built-in SMTP client (`mailer.js`) — no npm packages required. Configure
-`SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` (see `.env.example` for Gmail and
-SendGrid examples). Without SMTP configured, email alerts fail gracefully; in-app and
-browser-tab notifications still work.
-
-**Note on testing:** I verified the client fails safely when unconfigured, but I
-couldn't send a real email from this environment either (same network restriction).
-Test it yourself with real credentials before relying on it.
+Alert emails are sent through [Resend](https://resend.com) over HTTPS (`mailer.js`). Set
+`RESEND_API_KEY` (and optionally `RESEND_FROM`). Without it, email alerts fail gracefully; in-app and
+browser-tab notifications still work. Test it from the admin dashboard with real credentials before
+relying on it.
 
 ## Browser notifications
 
@@ -84,7 +93,8 @@ it's packaged to deploy in a few minutes on any of these:
 4. Add a **persistent disk** (Render: "Disks"; Railway: a volume) mounted at `/data`,
    and set the environment variable `DB=/data/signalstack.db` so your data survives
    redeploys.
-5. Add the SMTP/GITHUB_TOKEN env vars from `.env.example` if you want them.
+5. Add the environment variables from the table in the Ingestion section (at least `OPERATOR_NAME`, `CONTACT_EMAIL`, `JURISDICTION`; `RESEND_API_KEY` for email alerts).
+6. Use Node 22.5+ (set `NODE_VERSION=22` on Render), or choose the Docker runtime.
 
 ### Fly.io
 ```bash
@@ -98,7 +108,7 @@ fly deploy
 ```bash
 docker build -t signalstack .
 docker run -d -p 3000:3000 -v signalstack_data:/data \
-  -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
+  -e RESEND_API_KEY=... -e OPERATOR_NAME=... -e CONTACT_EMAIL=... -e JURISDICTION=... \
   signalstack
 ```
 
@@ -109,11 +119,10 @@ ephemeral filesystem, or your data resets on every redeploy.
 
 ```
 server.js          HTTP server, routing, auth, admin API, scheduler
-ingest.js          Fetch/parse/dedupe logic for HF, GitHub, arXiv
-mailer.js          Dependency-free SMTP client
+ingest.js          Fetch/parse/dedupe logic for Hugging Face, arXiv, GitHub and blog feeds
+mailer.js          Email alerts via the Resend HTTPS API
 public/index.html  Frontend (auth screens + single-page app)
 Dockerfile          Container build
-.env.example        Config template
 ```
 
 ## API surface
