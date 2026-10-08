@@ -22,7 +22,8 @@ create table if not exists ingestion_log(id integer primary key,source_id text r
 create table if not exists notification_log(id integer primary key,user_id integer references users(id) on delete cascade,channel text,status text,error text,ts text default current_timestamp);
 create index if not exists ix_res on results(model_id,bench_id);create index if not exists ix_ev on events(ts);create index if not exists ix_ses on sessions(user_id);create index if not exists ix_log on ingestion_log(ts);`);
 // Record when each user accepted the Terms/Privacy Policy (added in a later version, so migrate older databases).
-for(const c of ['accepted_at text','accepted_version text']){try{db.exec('alter table users add column '+c)}catch(e){if(!/duplicate column/i.test(e.message))throw e}}
+for(const [t,c] of [['users','accepted_at text'],['users','accepted_version text'],['models','likes integer default 0'],['models','downloads integer default 0'],['models','url text'],['papers','authors text']]){try{db.exec('alter table '+t+' add column '+c)}catch(e){if(!/duplicate column/i.test(e.message))throw e}}
+db.exec('create index if not exists ix_mrel on models(rel);create index if not exists ix_mlikes on models(likes);create index if not exists ix_pdate on papers(date)');
  
 // ---- DEMO seed data (fictional). Replace with ingestion jobs for live data. ----
 if(process.env.SEED_DEMO==='true'&&!db.prepare('select 1 from orgs').get()){
@@ -41,7 +42,7 @@ ins('papers',[['p1','Meridian 3 Technical Report (demo)','na','2026-08-14','meri
 ins('events',[[null,'Critical','2026-09-28 09:12','ko','kestrel-moe','Model Release','Kestrel MoE 230B open weights published.','demo://kestrel/release'],[null,'Major','2026-09-28 08:40','al','aster-r2','Documentation','API docs changed: new reasoning_effort parameter.','demo://aster/docs'],[null,'Important','2026-09-27 21:05','na','meridian-3','Pricing','Output token price lowered.','demo://northwind/pricing'],[null,'Research','2026-09-27 14:30','al','aster-long','Research','Hybrid SSM paper detected.','demo://arxiv/p2'],[null,'Major','2026-09-26 19:00','na','meridian-3','Benchmark','CodeEval v3 independent run added (71.2).','demo://evalgroup/run-118'],[null,'Normal','2026-09-25 10:00','ko','kestrel-70b','Open Source','Quantized builds released.','demo://hf/kestrel']]);
 ins('doc_versions',[['v4.1','2026-09-10','temperature: 0-2;;timeout default: 30s;;legacy_stream: supported'],['v4.2','2026-09-20','temperature: 0-2;;timeout default: 60s;;legacy_stream: supported'],['v4.3','2026-09-26','temperature: 0-2;;timeout default: 120s;;reasoning_effort: low|medium|high']]);
 }
-if(!db.prepare('select 1 from orgs where id=?').get('ext'))db.prepare("insert into orgs values('ext','External / Unverified')").run();
+for(const o of [['ext','External / Unverified'],['hf','Hugging Face Hub'],['arxiv','arXiv'],['gh','GitHub releases']])db.prepare('insert or ignore into orgs values(?,?)').run(...o);
 if(process.env.SEED_DEMO!=='true'){try{db.exec(`delete from results where source like 'demo://%';
 delete from events where source like 'demo://%';
 delete from papers where url like 'demo://%';
@@ -49,12 +50,30 @@ delete from models where id in ('meridian-3','meridian-mini','aster-r2','kestrel
 delete from benchmarks where id in ('codeeval-v3','codeeval-v2','reasonbench','mathset');
 delete from doc_versions where version in ('v4.1','v4.2','v4.3');
 delete from orgs where id in ('na','al','ko');`)}catch(e){console.error('Demo cleanup failed:',e.message)}}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
- if(!db.prepare('select 1 from sources_config').get()){
-const si=db.prepare('insert into sources_config(id,kind,label,config,enabled) values(?,?,?,?,1)');
-si.run('hf-new-models','huggingface','Hugging Face — newest models',JSON.stringify({url:'https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20'}));
-si.run('gh-transformers','github','GitHub — huggingface/transformers releases',JSON.stringify({owner:'huggingface',repo:'transformers'}));
-si.run('arxiv-llm','arxiv','arXiv — recent language model papers',JSON.stringify({query:'cat:cs.CL AND abs:language model',max:10}));
-}
+// ---- live sources (edit the sources_config table to change these; rows with "v":2 are never overwritten) ----
+const org=(id,name)=>({id,name});
+const SOURCES=[
+['hf-new-models','huggingface','Hugging Face — newest models',{sort:'createdAt',limit:100,pages:5,backfillPages:10}],
+['hf-top-liked','huggingface','Hugging Face — most-liked models',{sort:'likes',limit:100,pages:5,backfillPages:5}],
+['hf-trending','huggingface','Hugging Face — trending models',{sort:'trendingScore',limit:50,pages:1,events:true,maxEvents:25}],
+['arxiv-llm','arxiv','arXiv — language model papers',{query:'cat:cs.CL AND abs:language model',limit:100,maxEvents:5}],
+['arxiv-cs-cl','arxiv','arXiv — cs.CL (language)',{category:'cs.CL',limit:100,backfillPages:3}],
+['arxiv-cs-lg','arxiv','arXiv — cs.LG (machine learning)',{category:'cs.LG',limit:100,backfillPages:3}],
+['arxiv-cs-ai','arxiv','arXiv — cs.AI',{category:'cs.AI',limit:100,backfillPages:3}],
+['arxiv-cs-cv','arxiv','arXiv — cs.CV (vision)',{category:'cs.CV',limit:100,backfillPages:3}],
+['gh-transformers','github','GitHub — huggingface/transformers',{owner:'huggingface',repo:'transformers'}],
+['gh-llamacpp','github','GitHub — ggml-org/llama.cpp',{owner:'ggml-org',repo:'llama.cpp'}],
+['gh-vllm','github','GitHub — vllm-project/vllm',{owner:'vllm-project',repo:'vllm'}],
+['gh-ollama','github','GitHub — ollama/ollama',{owner:'ollama',repo:'ollama'}],
+['gh-diffusers','github','GitHub — huggingface/diffusers',{owner:'huggingface',repo:'diffusers'}],
+['gh-openai-python','github','GitHub — openai/openai-python',{owner:'openai',repo:'openai-python'}],
+['gh-anthropic-sdk','github','GitHub — anthropics/anthropic-sdk-python',{owner:'anthropics',repo:'anthropic-sdk-python'}],
+['feed-openai','feed','OpenAI — news',{url:'https://openai.com/news/rss.xml',org:org('openai','OpenAI')}],
+['feed-deepmind','feed','Google DeepMind — blog',{url:'https://deepmind.google/blog/rss.xml',org:org('deepmind','Google DeepMind')}],
+['feed-hf-blog','feed','Hugging Face — blog',{url:'https://huggingface.co/blog/feed.xml',org:org('hfblog','Hugging Face Blog')}]];
+for(const [id,kind,label,cfg] of SOURCES){const c=JSON.stringify({v:2,...cfg});
+db.prepare('insert or ignore into sources_config(id,kind,label,config,enabled) values(?,?,?,?,1)').run(id,kind,label,c);
+db.prepare("update sources_config set kind=?,label=?,config=? where id=? and config not like '%\"v\":2%'").run(kind,label,c,id)}
  
 // ---- helpers ----
 const hash=(pw,salt=cr.randomBytes(16).toString('hex'))=>salt+':'+cr.scryptSync(pw,salt,64).toString('hex');
@@ -64,6 +83,7 @@ const send=(res,code,obj,h={})=>{res.writeHead(code,{'Content-Type':'application
 const SEV={Normal:0,Important:1,Research:1,Major:2,Critical:3},MIN={All:0,'Major only':2,'Critical only':3};
 const shape=m=>({...m,open:!!m.open,verified:!!m.verified,uses:m.uses?m.uses.split(',').filter(Boolean):[]});
 const M='select m.*,o.name org from models m join orgs o on o.id=m.org_id';
+const likeOf=t=>'%'+String(t).replace(/[\\%_]/g,'\\$&')+'%',pageOf=q=>({limit:Math.min(Math.max(+q.get('limit')||50,1),200),offset:Math.max(+q.get('offset')||0,0)});
 // SQL filter for events (alias e): hide events about models/papers an admin has not approved yet.
 const EV_OK="(e.model_id is null or e.model_id in (select id from models where verified=1)) and not exists(select 1 from papers pp where pp.url=e.source and pp.verified=0)";
 async function notify(db,event){
@@ -126,21 +146,33 @@ if(p==='/api/me'){if(!need())return;return send(res,200,db.prepare('select id,em
 const isAdmin=uid&&db.prepare('select role from users where id=?').get(uid)?.role==='admin';
 const needAdmin=()=>{if(!need())return false;if(!isAdmin){send(res,403,{error:'This area is for admins only.'});return false}return true};
 // data (public, read-only: anyone can browse; only reviewed items are shown, unreviewed ones stay admin-only)
-if(p==='/api/models')return send(res,200,db.prepare(M+' where m.verified=1 order by m.rel desc').all().map(shape));
-let m=p.match(/^\/api\/models\/([\w-]+)$/);
-if(m){const md=db.prepare(M+' where m.id=? and m.verified=1').get(m[1]);if(!md)return send(res,404,{error:'Model not found.'});
+if(p==='/api/status'){const c=t=>db.prepare('select count(*) c from '+t).get().c;
+return send(res,200,{demo:!!db.prepare("select 1 from events where source like 'demo://%' limit 1").get(),
+counts:{models:db.prepare('select count(*) c from models where verified=1').get().c,papers:db.prepare('select count(*) c from papers where verified=1').get().c,
+eventsWeek:db.prepare("select count(*) c from events e where e.ts>=datetime('now','-7 day') and "+EV_OK).get().c,benchmarks:c('benchmarks'),docs:c('doc_versions')},
+lastUpdate:db.prepare("select max(last_run) t from sources_config where last_status in ('ok','unchanged')").get().t,
+sources:db.prepare('select count(*) total,sum(last_status in (\'ok\',\'unchanged\')) healthy from sources_config where enabled=1').get()})}
+if(p==='/api/models'){const t=(q.get('q')||'').trim(),ids=(q.get('ids')||'').split(',').filter(Boolean).slice(0,50),{limit,offset}=pageOf(q),
+order={likes:'m.likes desc,m.rowid desc',downloads:'m.downloads desc,m.rowid desc'}[q.get('sort')]||'m.rel desc,m.rowid desc',
+w=' where m.verified=1 and (?1 is null or m.name like ?1 escape \'\\\' or m.uses like ?1 escape \'\\\') and (?2 is null or m.id in (select value from json_each(?2)))',
+a=[t?likeOf(t):null,ids.length?JSON.stringify(ids):null];
+return send(res,200,{total:db.prepare('select count(*) c from models m'+w).get(...a).c,items:db.prepare(M+w+' order by '+order+' limit ?3 offset ?4').all(...a,limit,offset).map(shape)})}
+let m=p.match(/^\/api\/models\/([^/]+)$/);
+if(m){try{m[1]=decodeURIComponent(m[1])}catch(e){return send(res,400,{error:'Bad model id.'})}const md=db.prepare(M+' where m.id=? and m.verified=1').get(m[1]);if(!md)return send(res,404,{error:'Model not found.'});
 return send(res,200,{model:shape(md),results:db.prepare('select r.*,b.name bname,b.ver bver from results r join benchmarks b on b.id=r.bench_id where model_id=? order by date desc').all(m[1]),
 papers:db.prepare("select * from papers where verified=1 and (','||model_ids||',') like ?").all('%,'+m[1]+',%'),events:db.prepare('select * from events where model_id=? order by ts desc').all(m[1])})}
 if(p==='/api/benchmarks')return send(res,200,db.prepare('select * from benchmarks').all());
 m=p.match(/^\/api\/benchmarks\/([\w-]+)$/);
 if(m)return send(res,200,{benchmark:db.prepare('select * from benchmarks where id=?').get(m[1]),results:db.prepare('select r.*,mo.name mname from results r join models mo on mo.id=r.model_id where bench_id=? and mo.verified=1 order by score desc').all(m[1])});
-if(p==='/api/papers')return send(res,200,db.prepare('select p.*,o.name org from papers p join orgs o on o.id=p.org_id where p.verified=1 order by date desc').all().map(x=>({...x,verified:!!x.verified})));
+if(p==='/api/papers'){const t=(q.get('q')||'').trim(),{limit,offset}=pageOf(q),
+w=' where p.verified=1 and (?1 is null or p.title like ?1 escape \'\\\' or p.tldr like ?1 escape \'\\\' or p.authors like ?1 escape \'\\\' or p.arch like ?1 escape \'\\\')',a=[t?likeOf(t):null];
+return send(res,200,{total:db.prepare('select count(*) c from papers p'+w).get(...a).c,items:db.prepare('select p.*,o.name org from papers p join orgs o on o.id=p.org_id'+w+' order by p.date desc,p.rowid desc limit ?2 offset ?3').all(...a,limit,offset).map(x=>({...x,verified:!!x.verified}))})}
 if(p==='/api/events'){const o=q.get('org'),sv=q.get('sev');return send(res,200,db.prepare('select e.*,o.name org,mo.name model from events e join orgs o on o.id=e.org_id left join models mo on mo.id=e.model_id where '+EV_OK+' and (?1 is null or e.org_id=?1) and (?2 is null or e.sev=?2) order by ts desc limit ?3').all(o,sv,Math.min(+q.get('limit')||50,100)))}
 if(p==='/api/orgs')return send(res,200,db.prepare('select * from orgs').all());
 if(p==='/api/docs')return send(res,200,db.prepare('select version,date from doc_versions order by date desc').all());
 if(p==='/api/docs/diff'){const a=db.prepare('select lines from doc_versions where version=?').get(q.get('a')),b=db.prepare('select lines from doc_versions where version=?').get(q.get('b'));if(!a||!b)return send(res,404,{error:'Version not found.'});return send(res,200,diff(a.lines,b.lines))}
 if(p==='/api/search'){const t=q.get('q')||'';if(t.length<2)return send(res,200,{});const l='%'+t+'%';
-return send(res,200,{models:db.prepare('select id,name from models where verified=1 and (name like ?1 or arch like ?1 or uses like ?1)').all(l),benchmarks:db.prepare('select id,name,ver from benchmarks where name like ?1 or cat like ?1').all(l),papers:db.prepare('select id,title from papers where verified=1 and (title like ?1 or tldr like ?1 or arch like ?1)').all(l),events:db.prepare('select e.id,e.summary from events e where '+EV_OK+' and (e.summary like ?1 or e.cat like ?1)').all(l)})}
+return send(res,200,{models:db.prepare('select id,name from models where verified=1 and (name like ?1 or arch like ?1 or uses like ?1) order by likes desc limit 25').all(l),benchmarks:db.prepare('select id,name,ver from benchmarks where name like ?1 or cat like ?1').all(l),papers:db.prepare('select id,title,url from papers where verified=1 and (title like ?1 or tldr like ?1 or arch like ?1) order by date desc limit 25').all(l),events:db.prepare('select e.id,e.summary from events e where '+EV_OK+' and (e.summary like ?1 or e.cat like ?1) order by e.ts desc limit 25').all(l)})}
 // personal (login required)
 if(!need())return;
 if(p==='/api/watchlist'){if(req.method==='POST')db.prepare('insert or ignore into watchlist values(?,?)').run(uid,j.model_id);if(req.method==='DELETE')db.prepare('delete from watchlist where user_id=? and model_id=?').run(uid,j.model_id);return send(res,200,db.prepare('select model_id from watchlist where user_id=?').all(uid).map(r=>r.model_id))}
@@ -156,7 +188,7 @@ pendingModels:db.prepare('select count(*) c from models where verified=0').get()
 sources:db.prepare('select * from sources_config').all(),
 emailsSent:db.prepare("select count(*) c from notification_log where status='sent'").get().c,
 emailsFailed:db.prepare("select count(*) c from notification_log where status='failed'").get().c,
-emailConfigured:!!process.env.SMTP_HOST})}
+emailConfigured:!!process.env.RESEND_API_KEY})}
 if(p==='/api/admin/log'){if(!needAdmin())return;return send(res,200,db.prepare('select * from ingestion_log order by ts desc limit 40').all())}
 if(p==='/api/admin/pending'){if(!needAdmin())return;return send(res,200,{models:db.prepare('select * from models where verified=0').all().map(shape),papers:db.prepare('select * from papers where verified=0').all()})}
 if(p==='/api/admin/review'&&req.method==='POST'){if(!needAdmin())return;const t=j.type==='paper'?'papers':'models';
@@ -180,7 +212,7 @@ if(p==='/api/admin/test-email'&&req.method==='POST'){if(!needAdmin())return;
 const r=await sendMail({to:j.to,subject:'Signalstack test email',text:'If you are reading this, your SMTP settings are working correctly.'});
 return send(res,r.ok?200:500,r)}
 send(res,404,{error:'Endpoint not found.'})}catch(e){console.error(e);send(res,500,{error:'Something went wrong on our side. Try again shortly.'})}})}).listen(PORT,()=>{console.log('Signalstack running at http://localhost:'+PORT);
-scheduleIngestion();});
+if(process.env.DISABLE_INGEST!=='true')scheduleIngestion();});
  
 function scheduleIngestion(){
 const mins=Math.max(5,+process.env.INGEST_INTERVAL_MIN||30);
