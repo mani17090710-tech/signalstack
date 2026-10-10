@@ -94,18 +94,19 @@ function modelOut(m) {
     cats: (m.cats || '').split(',').filter(Boolean), params: m.params_label || null, param_count: m.param_count || null,
     gated: !!m.gated, likes: m.likes || 0, downloads: m.downloads || 0, url: m.url || null, arxiv: m.arxiv || null,
     verification: m.verification || 'community', source_type: m.source_type || 'huggingface', trend_rank: m.trend_rank || null,
+    context_length: m.ctx_tokens || null, price_in: m.price_in ?? null, price_out: m.price_out ?? null, modality: m.modality || null,
   };
 }
 const M_SELECT = 'select m.* from models m';
 
-const signalRows = (where, args, limit) => db.prepare(`select e.*, m.likes mlikes, m.downloads mdownloads, m.param_count mparams, m.released_at mreleased, m.company_id mcompany, m.name mname, m.verification mver
+const signalRows = (where, args, limit) => db.prepare(`select e.*, m.likes mlikes, m.downloads mdownloads, m.param_count mparams, m.released_at mreleased, m.company_id mcompany, m.name mname, m.verification mver, m.source_type msrc, m.ctx_tokens mctx
   from events e left join models m on m.id=e.model_id where ${EV_OK} ${where} order by e.ts desc limit ${limit}`).all(...args);
 
 function signalOut(e) {
   const meta = parseJson(e.meta, {}), co = e.company_id ? byId(e.company_id) : null;
   const sc = scoreSignal({
     cat: e.cat, ts: e.ts, companyName: co && co.name, meta, mentions: meta.mentions, tier: meta.tier || (e.verification === 'verified' ? 'primary' : null),
-    model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, released_at: e.mreleased, company_id: e.mcompany } : null,
+    model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, released_at: e.mreleased, company_id: e.mcompany, adoption: !['openrouter', 'curated'].includes(e.msrc), ctx_tokens: e.mctx } : null,
   });
   return {
     id: e.id, ts: e.ts, cat: e.cat, title: e.title || e.summary, summary: e.summary, detail: e.detail || null, url: e.source || null,
@@ -201,12 +202,12 @@ get(/^\/api\/models$/, ({ q }) => {
   const cat = (q.get('cat') || '').replace(/[^a-z]/g, ''), co = q.get('company'), lic = q.get('license');
   const where = ` where m.verified=1 and (?1 is null or m.name like ?1 escape '\\') and (?2 is null or m.id in (select value from json_each(?2)))
     and (?3 is null or m.cats like ?3) and (?4 is null or m.company_id=?4) and (?5 is null or m.license=?5)
-    and (?6 is null or m.pipeline=?6) and (?7=0 or m.company_id is not null)`;
-  const a = [t ? likeOf(t) : null, ids.length ? JSON.stringify(ids) : null, cat ? '%,' + cat + ',%' : null, co || null, lic || null, q.get('task') || null, q.get('official') === '1' ? 1 : 0];
+    and (?6 is null or m.pipeline=?6) and (?7=0 or m.company_id is not null) and (?8 is null or m.source_type=?8 or (?8='api' and m.source_type in ('openrouter','curated')))`;
+  const a = [t ? likeOf(t) : null, ids.length ? JSON.stringify(ids) : null, cat ? '%,' + cat + ',%' : null, co || null, lic || null, q.get('task') || null, q.get('official') === '1' ? 1 : 0, ['huggingface', 'openrouter', 'curated'].includes(q.get('source')) ? q.get('source') : q.get('source') === 'api' ? 'api' : null];
   const order = MODEL_ORDER[q.get('sort')] || MODEL_ORDER.new;
   return {
     total: db.prepare('select count(*) c from models m' + where).get(...a).c,
-    items: db.prepare(M_SELECT + where + ` order by ${order}, m.rowid desc limit ?8 offset ?9`).all(...a, limit, offset).map(modelOut),
+    items: db.prepare(M_SELECT + where + ` order by ${order}, m.rowid desc limit ?9 offset ?10`).all(...a, limit, offset).map(modelOut),
   };
 });
 // Facets are computed over all models so the category tabs and filters show real counts (empty categories can be hidden).
@@ -234,13 +235,13 @@ get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
   if (!row.detail_at || Date.now() - Date.parse(row.detail_at.replace(' ', 'T') + 'Z') > 36e5) await enrichModel(db, id).catch(() => {});
   const md = db.prepare('select * from models where id=?').get(id), out = modelOut(md);
   const sig = signalOut({ ...(db.prepare('select * from events where model_id=? order by ts desc limit 1').get(id) || { cat: 'Model Release', ts: md.released_at || md.rel, company_id: md.company_id, source: md.url }),
-    mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, model_id: id });
+    mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens, model_id: id });
   const papers = (md.arxiv ? db.prepare("select id,title,authors,published_at,date,url,verification from papers where id=? and verified=1").all('arxiv:' + md.arxiv) : []);
   const similar = db.prepare(M_SELECT + ` where m.verified=1 and m.id!=? and ((?2 is not null and m.company_id=?2) or (?3 is not null and m.pipeline=?3)) order by m.likes desc limit 6`).all(id, md.company_id || null, md.pipeline || null).map(modelOut);
   return {
     model: out, signal: { score: sig.score, importance: sig.importance, parts: sig.parts, why: sig.why },
     company: md.company_id ? (({ id: cid, name, site }) => ({ id: cid, name, site }))(byId(md.company_id)) : null,
-    events: db.prepare('select * from events where model_id=? order by ts desc limit 20').all(id).map(e => signalOut({ ...e, mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id })),
+    events: db.prepare('select * from events where model_id=? order by ts desc limit 20').all(id).map(e => signalOut({ ...e, mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens })),
     results: db.prepare('select r.*,b.name bname,b.ver bver from results r join benchmarks b on b.id=r.bench_id where model_id=? order by date desc').all(id),
     papers, similar, detailFetched: !!md.detail_at,
   };

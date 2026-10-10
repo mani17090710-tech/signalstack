@@ -1,5 +1,5 @@
 // Model detail: facts with their source, a Signal Score with its reasoning, related research and history.
-import { api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName } from '../lib.js';
+import { api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi } from '../lib.js';
 
 const fact = (k, v, unit = '') => html`<dt>${k}</dt><dd>${v == null || v === '' ? html`<span class="na">${NA}</span>` : v}${v == null || v === '' ? '' : unit}</dd>`;
 
@@ -15,11 +15,12 @@ export async function render(id) {
         <section class="panel"><h2>Signal Score</h2>
           <div class="sig-head">${scoreRing(s.score, true)}<div><b>${s.importance}</b><p class="detail">SignalStack’s estimate of how much attention this deserves right now.</p></div></div>${scoreBreakdown(s, true)}</section>
         <section class="panel"><h2>Facts</h2><dl class="kv">
-          ${fact('Publisher', m.company || m.creator)}${fact('Released', m.released_at ? day(m.released_at) : null)}${fact('Last updated', m.updated_at ? day(m.updated_at) : null)}
-          ${fact('Parameters', m.params)}${fact('License', m.license)}${fact('Task', m.pipeline)}${fact('Library', m.library)}${fact('Architecture', m.arch)}
-          ${fact('Context length', null)}${fact('Pricing', null)}${fact('Downloads', num(m.downloads))}${fact('Likes', num(m.likes))}</dl>
+          ${fact('Publisher', m.company || m.creator)}${fact('Released', m.released_at ? day(m.released_at) : null)}${isApi(m) ? '' : fact('Last updated', m.updated_at ? day(m.updated_at) : null)}
+          ${isApi(m) ? html`<dt>Parameters</dt><dd><span class="na">Not publicly available</span></dd>` : fact('Parameters', m.params)}${fact('License', m.license)}${fact('Task', m.pipeline)}${isApi(m) ? '' : html`${fact('Library', m.library)}${fact('Architecture', m.arch)}`}
+          ${fact('Context length', ctxLabel(m.context_length))}${fact('Pricing', priceLabel(m))}${fact('Modalities', m.modality)}${isApi(m) ? '' : html`${fact('Downloads', num(m.downloads))}${fact('Likes', num(m.likes))}`}</dl>
           <p class="src"><a href="${safeUrl(m.url)}" target="_blank" rel="noopener noreferrer">${host(m.url) || 'Source'}</a><span>Checked ${ago(m.retrieved_at)}</span></p>
-          ${d.detailFetched ? '' : html`<p class="fine">Exact size and last-updated date are filled in from the model page when it can be reached.</p>`}</section></div>
+          ${m.source_type === 'openrouter' ? html`<p class="fine">Listed by OpenRouter, a third-party catalogue. Prices are what OpenRouter charges and can differ from the lab\u2019s own. Reported, not confirmed by the lab.</p>` : ''}
+          ${isApi(m) || d.detailFetched ? '' : html`<p class="fine">Exact size and last-updated date are filled in from the model page when it can be reached.</p>`}</section></div>
       ${verLegend()}
       ${d.papers.length ? html`<section class="blk"><header><h2>Research paper</h2></header><div class="panel rows">${d.papers.map(p => html`<div><h3><a href="${safeUrl(p.url)}" target="_blank" rel="noopener noreferrer">${p.title}</a></h3><p class="meta">${p.authors || ''}</p><p class="meta">Published ${stamp(p.published_at || p.date)}</p></div>`)}</div></section>`
         : m.arxiv ? html`<p class="checked">Linked to arXiv ${m.arxiv}, which is not in our collection yet.</p>` : ''}

@@ -12,7 +12,7 @@ export async function showIntro(go) {
   mount(el, html`<canvas id="universe" aria-hidden="true"></canvas><div class="intro-tip" id="itip"></div>
     <button class="intro-skip" id="iskip">Skip intro</button>
     <div class="intro-copy"><h1>Every AI model, paper and release in one live view</h1>
-    <p>Signalstack reads Hugging Face, arXiv, GitHub and official lab blogs, then shows what is new with the source beside it.</p>
+    <p>Signalstack reads Hugging Face, arXiv, GitHub, official lab blogs and a public model catalogue, then shows what is new with the source beside it.</p>
     <div class="intro-stat" id="istat"></div>
     <div class="intro-cta"><button class="pri" id="iexp">Explore the AI Universe →</button><button id="inow">See What’s Happening Now</button></div></div>`);
   let stop = () => {};

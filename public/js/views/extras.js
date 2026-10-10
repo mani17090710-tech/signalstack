@@ -1,5 +1,5 @@
 // Companies, comparison, benchmarks and documentation diffs.
-import { api, html, pageHead, empty, modelCard, signalCard, day, num, NA, mid, shortName, safeUrl, $, mount, CAT_LABEL } from '../lib.js';
+import { ctxLabel, priceLabel, api, html, pageHead, empty, modelCard, signalCard, day, num, NA, mid, shortName, safeUrl, $, mount, CAT_LABEL } from '../lib.js';
 
 export const companies = {
   async render() {
@@ -31,7 +31,7 @@ export const compare = {
         <div class="toolbar mt"><input id="cq" type="search" placeholder="Add a model by name" aria-label="Add a model"></div><div class="tags" id="cres"></div>
         <div class="tw mt"><table><tr><th></th>${D.map(d => html`<th><a href="#model/${mid(d.model.id)}">${shortName(d.model.id).split('/').pop()}</a></th>`)}</tr>
           ${row('Publisher', m => m.company || m.creator)}${row('Released', m => (m.released_at ? day(m.released_at) : null))}${row('Parameters', m => m.params)}${row('License', m => m.license)}${row('Task', m => m.pipeline)}
-          ${row('Categories', m => m.cats.map(c => CAT_LABEL[c] || c).join(', '))}${row('Likes', m => num(m.likes))}${row('Downloads', m => num(m.downloads))}${row('Signal Score', (m, d) => d.signal.score)}${row('Context length', () => null)}</table></div>`,
+          ${row('Categories', m => m.cats.map(c => CAT_LABEL[c] || c).join(', '))}${row('Likes', m => num(m.likes))}${row('Downloads', m => num(m.downloads))}${row('Signal Score', (m, d) => d.signal.score)}${row('Context length', m => ctxLabel(m.context_length))}${row('Pricing', m => priceLabel(m))}</table></div>`,
       after(root) {
         root.querySelectorAll('[data-cdel]').forEach(b => b.onclick = () => { picks = picks.filter(x => x !== b.dataset.cdel); window.dispatchEvent(new HashChangeEvent('hashchange')); });
         let t; $('#cq', root).oninput = e => { clearTimeout(t); t = setTimeout(async () => {
