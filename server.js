@@ -106,7 +106,7 @@ function signalOut(e) {
   const meta = parseJson(e.meta, {}), co = e.company_id ? byId(e.company_id) : null;
   const sc = scoreSignal({
     cat: e.cat, ts: e.ts, companyName: co && co.name, meta, mentions: meta.mentions, tier: meta.tier || (e.verification === 'verified' ? 'primary' : null),
-    model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, released_at: e.mreleased, company_id: e.mcompany, adoption: e.msrc !== 'openrouter', ctx_tokens: e.mctx } : null,
+    model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, released_at: e.mreleased, company_id: e.mcompany, adoption: !['openrouter', 'curated'].includes(e.msrc), ctx_tokens: e.mctx } : null,
   });
   return {
     id: e.id, ts: e.ts, cat: e.cat, title: e.title || e.summary, summary: e.summary, detail: e.detail || null, url: e.source || null,
@@ -202,8 +202,8 @@ get(/^\/api\/models$/, ({ q }) => {
   const cat = (q.get('cat') || '').replace(/[^a-z]/g, ''), co = q.get('company'), lic = q.get('license');
   const where = ` where m.verified=1 and (?1 is null or m.name like ?1 escape '\\') and (?2 is null or m.id in (select value from json_each(?2)))
     and (?3 is null or m.cats like ?3) and (?4 is null or m.company_id=?4) and (?5 is null or m.license=?5)
-    and (?6 is null or m.pipeline=?6) and (?7=0 or m.company_id is not null) and (?8 is null or m.source_type=?8)`;
-  const a = [t ? likeOf(t) : null, ids.length ? JSON.stringify(ids) : null, cat ? '%,' + cat + ',%' : null, co || null, lic || null, q.get('task') || null, q.get('official') === '1' ? 1 : 0, ['huggingface', 'openrouter'].includes(q.get('source')) ? q.get('source') : null];
+    and (?6 is null or m.pipeline=?6) and (?7=0 or m.company_id is not null) and (?8 is null or m.source_type=?8 or (?8='api' and m.source_type in ('openrouter','curated')))`;
+  const a = [t ? likeOf(t) : null, ids.length ? JSON.stringify(ids) : null, cat ? '%,' + cat + ',%' : null, co || null, lic || null, q.get('task') || null, q.get('official') === '1' ? 1 : 0, ['huggingface', 'openrouter', 'curated'].includes(q.get('source')) ? q.get('source') : q.get('source') === 'api' ? 'api' : null];
   const order = MODEL_ORDER[q.get('sort')] || MODEL_ORDER.new;
   return {
     total: db.prepare('select count(*) c from models m' + where).get(...a).c,

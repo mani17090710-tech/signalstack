@@ -173,3 +173,4 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
 }
 @media (prefers-reduced-motion: reduce) { .sk i { animation: none; } * { scroll-behavior: auto !important; transition: none !important; } }
 .mt { margin-top: 24px; }
+.warn-t { color: var(--warn); }

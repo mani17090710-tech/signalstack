@@ -19,7 +19,7 @@ export async function render(id) {
           ${isApi(m) ? html`<dt>Parameters</dt><dd><span class="na">Not publicly available</span></dd>` : fact('Parameters', m.params)}${fact('License', m.license)}${fact('Task', m.pipeline)}${isApi(m) ? '' : html`${fact('Library', m.library)}${fact('Architecture', m.arch)}`}
           ${fact('Context length', ctxLabel(m.context_length))}${fact('Pricing', priceLabel(m))}${fact('Modalities', m.modality)}${isApi(m) ? '' : html`${fact('Downloads', num(m.downloads))}${fact('Likes', num(m.likes))}`}</dl>
           <p class="src"><a href="${safeUrl(m.url)}" target="_blank" rel="noopener noreferrer">${host(m.url) || 'Source'}</a><span>Checked ${ago(m.retrieved_at)}</span></p>
-          ${isApi(m) ? html`<p class="fine">Listed by OpenRouter, a third-party catalogue. Prices are what OpenRouter charges and can differ from the lab\u2019s own. Reported, not confirmed by the lab.</p>` : ''}
+          ${m.source_type === 'openrouter' ? html`<p class="fine">Listed by OpenRouter, a third-party catalogue. Prices are what OpenRouter charges and can differ from the lab\u2019s own. Reported, not confirmed by the lab.</p>` : ''}
           ${isApi(m) || d.detailFetched ? '' : html`<p class="fine">Exact size and last-updated date are filled in from the model page when it can be reached.</p>`}</section></div>
       ${verLegend()}
       ${d.papers.length ? html`<section class="blk"><header><h2>Research paper</h2></header><div class="panel rows">${d.papers.map(p => html`<div><h3><a href="${safeUrl(p.url)}" target="_blank" rel="noopener noreferrer">${p.title}</a></h3><p class="meta">${p.authors || ''}</p><p class="meta">Published ${stamp(p.published_at || p.date)}</p></div>`)}</div></section>`

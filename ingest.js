@@ -11,7 +11,9 @@
 //    verification level: verified = from the original publisher, community = open to anyone to publish.
 //  * Items are published immediately. Set REQUIRE_REVIEW=true to hold them for admin approval instead.
 const crypto = require('node:crypto');
-const { byHandle, byOrPrefix, byGithubOwner, byId, mentions } = require('./lib/companies');
+const fs = require('fs');
+const path = require('path');
+const { COMPANIES, byHandle, byOrPrefix, byGithubOwner, byId, mentions } = require('./lib/companies');
 const { categorize, tagInfo, parseParams, pipelineOf, typeLabel, formatCount } = require('./lib/classify');
 
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
@@ -230,6 +232,7 @@ async function runOpenRouter(db, src, cfg, f, first) {
       const price = m.priceIn != null && m.priceOut != null ? `$${m.priceIn} in / $${m.priceOut} out per 1M tokens` : null;
       // Models that also live on Hugging Face keep their Hugging Face page; we only add context length and pricing to it.
       if (m.hfId) { if (hasHf.get('hf:' + m.hfId)) attach.run(m.ctx, m.priceIn, m.priceOut, m.modality || null, m.ctx ? ctxLabel(m.ctx) : null, price, 'hf:' + m.hfId); continue; }
+      if (known.get('cu:' + m.orId)) continue; // the hand-kept, lab-linked entry wins
       const co = byOrPrefix(m.creator), c = categorize({ name: m.name, pipeline: m.pipeline, tags: m.tags });
       const isNew = !known.get(m.id);
       db.prepare(UPSERT_OR).run({
@@ -255,6 +258,70 @@ async function runOpenRouter(db, src, cfg, f, first) {
     db.exec('commit');
   } catch (e) { db.exec('rollback'); throw e; }
   return { firstText: r.text, items: items.length, created, inserted };
+}
+
+// ---------- Hand-kept list (data/curated-models.json) ----------
+// For closed models that OpenRouter does not list yet. Every entry must link to the lab's own announcement.
+function parseCurated(text) {
+  const j = JSON.parse(text), arr = j && j.models;
+  if (!Array.isArray(arr)) throw new Error('curated-models.json must contain a "models" array');
+  const items = [], problems = [];
+  arr.forEach((m, i) => {
+    const label = `entry ${i + 1}${m && m.id ? ' (' + m.id + ')' : ''}`;
+    const co = m && byId[m.company];
+    if (!m || !/^[a-z0-9][\w.-]*\/[\w.:-]+$/.test(String(m.id || ''))) problems.push(`${label}: id must look like lab/model-name in lowercase`);
+    else if (!m.name) problems.push(`${label}: name is required`);
+    else if (!co) problems.push(`${label}: unknown company "${m.company}"`);
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(String(m.released || '')) || isNaN(Date.parse(m.released))) problems.push(`${label}: released must be YYYY-MM-DD`);
+    else if (!httpUrl(m.url)) problems.push(`${label}: url must be an https link to the lab's announcement`);
+    else if (!String(m.url).startsWith('https://')) problems.push(`${label}: url must start with https://`);
+    else items.push({
+      id: 'cu:' + m.id, name: m.id, display: String(m.name), co, createdAt: m.released + 'T00:00:00.000Z', url: String(m.url),
+      ctx: +m.context > 0 ? Math.round(+m.context) : null, priceIn: m.price_in != null && +m.price_in >= 0 ? +m.price_in : null,
+      priceOut: m.price_out != null && +m.price_out >= 0 ? +m.price_out : null, modality: m.modality ? String(m.modality).slice(0, 60) : '', summary: m.summary ? String(m.summary).slice(0, 240) : '',
+    });
+  });
+  return { items, problems };
+}
+const UPSERT_CU = UPSERT_OR.replace("'or',''", "'cu',''").replace("'reported','openrouter'", "'verified','curated'");
+
+async function runCurated(db, src, cfg, f, first) {
+  const file = path.resolve(__dirname, cfg.file || 'data/curated-models.json');
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return { firstText: '', items: 0, created: 0, inserted: [], seen: nowIso() }; } // no file means nothing curated
+  const { items, problems } = parseCurated(text);
+  const known = db.prepare('select 1 from models where id=?'), inOr = db.prepare('select 1 from models where id=?');
+  const hasEv = db.prepare('select 1 from events where source=? and cat=?');
+  const inserted = [];
+  let created = 0;
+  db.exec('begin');
+  try {
+    for (const m of items) {
+      if (inOr.get('or:' + m.name)) continue; // already listed by OpenRouter; no duplicate
+      const isNew = !known.get(m.id);
+      const price = m.priceIn != null && m.priceOut != null ? `$${m.priceIn} in / $${m.priceOut} out per 1M tokens` : '';
+      db.prepare(UPSERT_CU).run({
+        id: m.id, name: m.name, ctx: m.ctx ? ctxLabel(m.ctx) : '', price, rel: m.createdAt.slice(0, 10), uses: '', verified: REVIEW(), url: m.url, creator: m.name.split('/')[0],
+        company: m.co.id, released: m.createdAt, pipeline: m.modality.includes('image') ? 'image-text-to-text' : 'text-generation', cats: ',', now: nowIso(),
+        ctxn: m.ctx, pin: m.priceIn, pout: m.priceOut, modality: m.modality || null,
+      });
+      if (isNew) {
+        created++;
+        if (!hasEv.get(m.url, 'Model Release')) {
+          const ev = addEvent(db, {
+            sev: 'Major', ts: ts16(m.createdAt), org_id: 'cu', model_id: m.id, cat: 'Model Release', summary: `New model from ${m.co.name}: ${m.display}.`, title: m.display,
+            detail: m.summary || null, source: m.url, source_type: 'curated', verification: 'verified', company_id: m.co.id,
+          });
+          if (!first) inserted.push(ev);
+        }
+      }
+    }
+    db.exec('commit');
+  } catch (e) { db.exec('rollback'); throw e; }
+  // Valid entries are saved; invalid ones are reported so the person editing the file can fix them.
+  const warning = problems.length ? `Skipped ${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'}: ${problems.slice(0, 3).join('; ')}` : '';
+  // Mark the file as seen even when it is empty, so the first entry someone adds later raises a signal.
+  return { firstText: text, items: items.length, created, inserted, warning, seen: nowIso() };
 }
 
 // ---------- arXiv ----------
@@ -349,13 +416,13 @@ async function runFeed(db, src, cfg, f, first) {
 // ---------- run one source / all sources ----------
 async function runSource(db, src, f, opt = {}) {
   const cfg = JSON.parse(src.config || '{}'), kind = src.kind, first = !src.last_seen;
-  const fn = { huggingface: runHF, openrouter: runOpenRouter, github: runGitHub, arxiv: runArxiv, feed: runFeed }[kind];
+  const fn = { huggingface: runHF, openrouter: runOpenRouter, curated: runCurated, github: runGitHub, arxiv: runArxiv, feed: runFeed }[kind];
   if (!fn) throw new Error('Unknown source kind: ' + kind);
   const r = await fn(db, src, cfg, f, first, opt);
   const hash = sha(r.firstText || '');
-  if (!first && hash === src.last_hash && !r.created) return { status: 'unchanged', items: 0, created: 0, inserted: [] };
+  if (!first && hash === src.last_hash && !r.created && !r.warning) return { status: 'unchanged', items: 0, created: 0, inserted: [] };
   db.prepare('update sources_config set last_hash=?,last_seen=? where id=?').run(hash, r.seen || (r.items ? nowIso() : src.last_seen), src.id);
-  return { status: 'ok', items: r.items, created: r.created, inserted: r.inserted, first };
+  return { status: r.warning ? 'warning' : 'ok', warning: r.warning || '', items: r.items, created: r.created, inserted: r.inserted, first };
 }
 
 function prune(db) {
@@ -380,8 +447,8 @@ async function runAll(db, f = fetch, opt = {}) {
       const ts = nowIso();
       try {
         const r = await runSource(db, src, f, opt);
-        db.prepare('update sources_config set last_run=?,last_status=?,last_error=null where id=?').run(ts, r.status, src.id);
-        const msg = r.status === 'unchanged' ? 'No new content since last check.' : `${r.first ? 'First run (backfill): ' : ''}Read ${r.items} item(s), ${r.created} new.`;
+        db.prepare('update sources_config set last_run=?,last_status=?,last_error=? where id=?').run(ts, r.status, r.warning || null, src.id);
+        const msg = r.status === 'unchanged' ? 'No new content since last check.' : `${r.first ? 'First run (backfill): ' : ''}Read ${r.items} item(s), ${r.created} new.${r.warning ? ' ' + r.warning : ''}`;
         db.prepare('insert into ingestion_log(source_id,ts,status,message,items) values(?,?,?,?,?)').run(src.id, ts, r.status, msg, r.items);
         all.push(...r.inserted);
       } catch (e) {
@@ -417,4 +484,4 @@ async function enrichModel(db, id, f = fetch) {
   }
 }
 
-module.exports = { parseOpenRouter, runAll, runSource, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };
+module.exports = { parseCurated, parseOpenRouter, runAll, runSource, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };

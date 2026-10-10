@@ -36,7 +36,7 @@ export const mid = id => encodeURIComponent(id);
 export const shortName = id => String(id || '').replace(/^(hf|or):/, '');
 export const ctxLabel = n => (!n ? null : n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M tokens' : n >= 1e3 ? Math.round(n / 1e3) + 'K tokens' : n + ' tokens');
 export const priceLabel = m => (m.price_in == null || m.price_out == null ? null : `$${m.price_in} in, $${m.price_out} out per 1M tokens`);
-export const isApi = m => m.source_type === 'openrouter';
+export const isApi = m => m.source_type === 'openrouter' || m.source_type === 'curated';
 export const safeUrl = u => (/^https?:\/\//i.test(u || '') ? u : '');
 export const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return ''; } };
 

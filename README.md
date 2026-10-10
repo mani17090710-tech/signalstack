@@ -176,4 +176,7 @@ The tests use mock network responses; no live calls are made.
   Amazon, Cohere and more), with context length and pricing. It is a third-party list, so these are badged
   Reported, not Verified, and prices are OpenRouter's. Models that also exist on Hugging Face keep their Hugging
   Face page and only gain context length and pricing.
+- **Hand-kept list:** `data/curated-models.json` is for closed models OpenRouter does not list yet. Each entry must
+  link to the lab's own announcement and is badged Verified. See `data/README.md` for the format. Invalid entries
+  are skipped and reported in Admin > Monitored sources.
 - The thresholds are in each source's `config` row in `sources_config` (`minLikes`, `minDownloads`).

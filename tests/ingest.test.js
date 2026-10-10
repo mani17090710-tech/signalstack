@@ -108,3 +108,25 @@ test('Hugging Face feeds skip unimportant community uploads but keep official la
   assert.ok(!ids.includes('hf:rando/tiny-finetune'));
   assert.ok(ids.includes('hf:Qwen/Qwen3-8B') && ids.includes('hf:someone/popular'));
 });
+
+test('hand-kept list: valid entries become Verified models with a signal, invalid ones are reported, OpenRouter duplicates are skipped', async () => {
+  const os = require('node:os'), fs = require('node:fs'), pth = require('node:path');
+  const file = pth.join(os.tmpdir(), 'cur-' + process.pid + '.json');
+  const good = { id: 'openai/gpt-example', name: 'GPT Example', company: 'openai', released: '2026-10-10', url: 'https://openai.com/index/gpt-example/', context: 400000, price_in: 2, price_out: 10, summary: 'A test model.' };
+  const dupe = { id: 'anthropic/claude-both', name: 'Claude Both', company: 'anthropic', released: '2026-10-09', url: 'https://www.anthropic.com/news/claude-both' };
+  const bad = [{ id: 'Bad Id', name: 'x', company: 'openai', released: '2026-10-10', url: 'https://x.test' }, { id: 'openai/no-link', name: 'x', company: 'openai', released: '2026-10-10' }, { id: 'nobody/model', name: 'x', company: 'nobody', released: '2026-10-10', url: 'https://x.test' }];
+  fs.writeFileSync(file, JSON.stringify({ models: [] }));
+  const db = openDb(':memory:');
+  db.exec("update sources_config set enabled=0 where id not in ('curated-models','openrouter-models')");
+  db.prepare("update sources_config set config=? where id='curated-models'").run(JSON.stringify({ v: 4, file, tier: 'primary' }));
+  await ingest.runAll(db, async () => res({ data: [orModel('anthropic/claude-both')] })); // backfill with an empty list
+  fs.writeFileSync(file, JSON.stringify({ models: [good, dupe, ...bad] }));
+  const out = await ingest.runAll(db, async () => res({ data: [orModel('anthropic/claude-both')] }));
+  const m = db.prepare("select * from models where id='cu:openai/gpt-example'").get();
+  assert.ok(m); assert.strictEqual(m.verification, 'verified'); assert.strictEqual(m.source_type, 'curated'); assert.strictEqual(m.ctx_tokens, 400000); assert.strictEqual(m.url, good.url);
+  assert.strictEqual(db.prepare("select count(*) n from models where id='cu:anthropic/claude-both'").get().n, 0, 'already in OpenRouter');
+  assert.ok(out.some(e => db.prepare('select model_id m from events where id=?').get(e.id)?.m === 'cu:openai/gpt-example'), 'raises a new-model signal');
+  const row = db.prepare("select last_status s,last_error e from sources_config where id='curated-models'").get();
+  assert.strictEqual(row.s, 'warning'); assert.match(row.e, /Skipped 3 invalid entries/);
+  fs.unlinkSync(file);
+});
