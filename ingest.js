@@ -11,7 +11,7 @@
 //    verification level: verified = from the original publisher, community = open to anyone to publish.
 //  * Items are published immediately. Set REQUIRE_REVIEW=true to hold them for admin approval instead.
 const crypto = require('node:crypto');
-const { byHandle, byGithubOwner, byId, mentions } = require('./lib/companies');
+const { byHandle, byOrPrefix, byGithubOwner, byId, mentions } = require('./lib/companies');
 const { categorize, tagInfo, parseParams, pipelineOf, typeLabel, formatCount } = require('./lib/classify');
 
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
@@ -144,6 +144,9 @@ async function runHF(db, src, cfg, f, first) {
     db.exec('begin');
     try {
       for (const m of items) {
+        // Keep only models that matter: official labs, models that are trending, or ones with real traction.
+        const official = !!byHandle(m.creator);
+        if (cfg.minLikes && !official && !cfg.trending && m.likes < cfg.minLikes && m.downloads < (cfg.minDownloads || 0)) continue;
         const isNew = !known.get(m.id);
         if (isNew) { fresh++; created++; }
         const d = saveModel(db, m);
@@ -178,6 +181,80 @@ async function runHF(db, src, cfg, f, first) {
     next = nu && nu.hostname === 'huggingface.co' ? nu.toString() : null;
   }
   return { firstText, items: total, created, inserted, seen: cfg.events === 'trending' && ids.length ? JSON.stringify(ids) : undefined };
+}
+
+
+// ---------- OpenRouter (closed and API-only models) ----------
+// OpenRouter's public catalogue lists models from OpenAI, Anthropic, Google, xAI and others, with context length and
+// pricing. It is a third-party list, so everything from it is badged "Reported", never "Verified".
+function parseOpenRouter(text) {
+  const j = JSON.parse(text), arr = j && j.data;
+  if (!Array.isArray(arr)) throw new Error('Unexpected OpenRouter response');
+  const nowSec = Date.now() / 1000;
+  return arr.filter(m => m && m.id && !String(m.id).includes(':') && !(m.expiration_date && Date.parse(m.expiration_date) < Date.now())).map(m => {
+    const [prefix] = String(m.id).split('/'), a = m.architecture || {}, inp = a.input_modalities || [], out = a.output_modalities || [];
+    const per1m = v => (v != null && v !== '' && isFinite(+v) && +v >= 0 ? +(+v * 1e6).toFixed(4) : null);
+    const tags = [];
+    if ((m.supported_parameters || []).includes('reasoning')) tags.push('reasoning');
+    if ((m.supported_parameters || []).includes('tools')) tags.push('tool-use');
+    const pipeline = out.includes('image') ? 'text-to-image' : out.includes('audio') ? 'text-to-audio' : out.includes('video') ? 'text-to-video'
+      : inp.includes('video') || inp.includes('audio') ? 'any-to-any' : inp.includes('image') ? 'image-text-to-text' : 'text-generation';
+    const created = +m.created > 0 && +m.created < nowSec + 86400 ? new Date(+m.created * 1000).toISOString() : '';
+    return {
+      id: 'or:' + m.id, orId: m.id, name: m.id, creator: prefix, createdAt: created, tags, pipeline,
+      hfId: m.hugging_face_id || '', ctx: +m.context_length > 0 ? Math.round(+m.context_length) : null,
+      priceIn: per1m(m.pricing && m.pricing.prompt), priceOut: per1m(m.pricing && m.pricing.completion),
+      modality: a.modality || '', url: 'https://openrouter.ai/' + m.id,
+    };
+  });
+}
+const ctxLabel = n => (n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n));
+const UPSERT_OR = `insert into models(id,name,org_id,arch,params,ctx,open,price,rel,ver,uses,verified,likes,downloads,url,creator,company_id,released_at,pipeline,cats,verification,source_type,retrieved_at,ctx_tokens,price_in,price_out,modality)
+  values($id,$name,'or','','',$ctx,0,$price,$rel,'',$uses,$verified,0,0,$url,$creator,$company,$released,$pipeline,$cats,'reported','openrouter',$now,$ctxn,$pin,$pout,$modality)
+  on conflict(id) do update set ctx=excluded.ctx,price=excluded.price,uses=excluded.uses,cats=excluded.cats,pipeline=excluded.pipeline,creator=excluded.creator,
+    company_id=excluded.company_id,retrieved_at=excluded.retrieved_at,ctx_tokens=excluded.ctx_tokens,price_in=excluded.price_in,price_out=excluded.price_out,
+    modality=excluded.modality,released_at=coalesce(models.released_at,excluded.released_at)`;
+
+async function runOpenRouter(db, src, cfg, f, first) {
+  const r = await fetchRes(cfg.url || 'https://openrouter.ai/api/v1/models', f);
+  const items = parseOpenRouter(r.text);
+  const known = db.prepare('select 1 from models where id=?'), hasHf = db.prepare('select 1 from models where id=?');
+  const attach = db.prepare('update models set ctx_tokens=coalesce(?,ctx_tokens),price_in=coalesce(?,price_in),price_out=coalesce(?,price_out),modality=coalesce(?,modality),ctx=coalesce(?,ctx),price=coalesce(?,price) where id=?');
+  const hasEv = db.prepare('select 1 from events where source=? and cat=?');
+  const evCap = first ? cfg.backfillEvents || 5 : cfg.maxEvents || 25;
+  const fresh = [], inserted = [];
+  let created = 0, evCount = 0;
+  db.exec('begin');
+  try {
+    for (const m of items) {
+      const price = m.priceIn != null && m.priceOut != null ? `$${m.priceIn} in / $${m.priceOut} out per 1M tokens` : null;
+      // Models that also live on Hugging Face keep their Hugging Face page; we only add context length and pricing to it.
+      if (m.hfId) { if (hasHf.get('hf:' + m.hfId)) attach.run(m.ctx, m.priceIn, m.priceOut, m.modality || null, m.ctx ? ctxLabel(m.ctx) : null, price, 'hf:' + m.hfId); continue; }
+      const co = byOrPrefix(m.creator), c = categorize({ name: m.name, pipeline: m.pipeline, tags: m.tags });
+      const isNew = !known.get(m.id);
+      db.prepare(UPSERT_OR).run({
+        id: m.id, name: m.name, ctx: m.ctx ? ctxLabel(m.ctx) : '', price: price || '', rel: (m.createdAt || nowIso()).slice(0, 10), uses: [m.pipeline, ...m.tags].join(','),
+        verified: REVIEW(), url: m.url, creator: m.creator, company: co ? co.id : null, released: m.createdAt || nowIso(), pipeline: m.pipeline,
+        cats: ',' + c.cats.join(',') + ',', now: nowIso(), ctxn: m.ctx, pin: m.priceIn, pout: m.priceOut, modality: m.modality || null,
+      });
+      if (isNew) { created++; fresh.push({ m, co, c }); }
+    }
+    // The newest additions become "new model" signals (a handful on the first run, so a fresh deploy is not flooded).
+    fresh.sort((a, b) => (a.m.createdAt < b.m.createdAt ? 1 : -1));
+    for (const { m, co, c } of fresh) {
+      if (evCount >= evCap || hasEv.get(m.url, 'Model Release')) continue;
+      const bits = [c.type, m.ctx ? ctxLabel(m.ctx) + ' token context' : '', m.priceIn != null && m.priceOut != null ? `$${m.priceIn} / $${m.priceOut} per 1M tokens` : ''].filter(Boolean);
+      const ev = addEvent(db, {
+        sev: co ? 'Major' : 'Important', ts: ts16(m.createdAt), org_id: 'or', model_id: m.id, cat: 'Model Release',
+        summary: `New model${co ? ' from ' + co.name : ''}: ${m.name}.`, title: m.name, detail: bits.join(', ') + '.',
+        source: m.url, source_type: 'openrouter', verification: 'reported', company_id: co ? co.id : null,
+      });
+      evCount++;
+      if (!first) inserted.push(ev);
+    }
+    db.exec('commit');
+  } catch (e) { db.exec('rollback'); throw e; }
+  return { firstText: r.text, items: items.length, created, inserted };
 }
 
 // ---------- arXiv ----------
@@ -215,7 +292,7 @@ async function runArxiv(db, src, cfg, f, first, opt) {
       }
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
-    if (!items.length || (!first && !n)) break;
+    if (!items.length || items.length < per || (!first && !n)) break; // a short page means the feed has run out
   }
   // Only papers that name a tracked lab or model family become signals; the rest stay searchable in Research.
   const inserted = [], cap = first ? cfg.backfillEvents || 5 : cfg.maxEvents || 10;
@@ -272,7 +349,7 @@ async function runFeed(db, src, cfg, f, first) {
 // ---------- run one source / all sources ----------
 async function runSource(db, src, f, opt = {}) {
   const cfg = JSON.parse(src.config || '{}'), kind = src.kind, first = !src.last_seen;
-  const fn = { huggingface: runHF, github: runGitHub, arxiv: runArxiv, feed: runFeed }[kind];
+  const fn = { huggingface: runHF, openrouter: runOpenRouter, github: runGitHub, arxiv: runArxiv, feed: runFeed }[kind];
   if (!fn) throw new Error('Unknown source kind: ' + kind);
   const r = await fn(db, src, cfg, f, first, opt);
   const hash = sha(r.firstText || '');
@@ -284,7 +361,7 @@ async function runSource(db, src, f, opt = {}) {
 function prune(db) {
   const days = Math.max(30, +process.env.RETENTION_DAYS || 365);
   try {
-    db.exec(`delete from models where org_id='hf' and company_id is null and likes<3 and downloads<50 and rel<date('now','-45 day')
+    db.exec(`delete from models where org_id='hf' and company_id is null and likes<10 and downloads<1000 and (trend_at is null or trend_at<datetime('now','-7 day')) and rel<date('now','-14 day')
       and id not in (select model_id from results where model_id is not null) and id not in (select model_id from events where model_id is not null) and id not in (select model_id from watchlist);
       delete from papers where date<date('now','-${days} day');
       delete from events where ts<datetime('now','-120 day') and model_id is null;
@@ -340,4 +417,4 @@ async function enrichModel(db, id, f = fetch) {
   }
 }
 
-module.exports = { runAll, runSource, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };
+module.exports = { parseOpenRouter, runAll, runSource, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };

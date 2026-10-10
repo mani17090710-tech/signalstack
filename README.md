@@ -10,7 +10,7 @@ Everything comes from real public sources and links back to them. There is no de
 - **Now:** the highest-scoring signals of the last day (or week when it is quiet), new official lab
   models, Hugging Face trending, and new papers.
 - **Signals:** every detected event with time-window, type, lab and verification filters.
-- **Models:** the "Model Universe" with category, lab, license, task and sort filters, plus a detail page
+- **Models:** the "Model Universe" (open-weight models that matter from Hugging Face, plus closed and API models from OpenRouter's public catalogue, badged Reported) with category, lab, license, task and sort filters, plus a detail page
   per model (size, license, task, library, architecture, linked paper, history, related models).
 - **Research:** recent arXiv papers (cs.CL, cs.LG, cs.AI, cs.CV). A lab is shown only when the title or
   abstract names it.
@@ -166,3 +166,14 @@ node --test tests/*.test.js
 ```
 
 The tests use mock network responses; no live calls are made.
+
+## Which models are included
+
+- **Open-weight (Hugging Face):** every model from the tracked labs' official accounts, plus models with real
+  traction (most liked, most downloaded, trending, or new models above a likes/downloads threshold). Unpopular
+  community uploads are not stored, and old ones are pruned.
+- **Closed and API models:** from OpenRouter's public catalogue (OpenAI, Anthropic, Google, xAI, Mistral, DeepSeek,
+  Amazon, Cohere and more), with context length and pricing. It is a third-party list, so these are badged
+  Reported, not Verified, and prices are OpenRouter's. Models that also exist on Hugging Face keep their Hugging
+  Face page and only gain context length and pricing.
+- The thresholds are in each source's `config` row in `sources_config` (`minLikes`, `minDownloads`).

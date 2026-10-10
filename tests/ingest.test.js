@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const { openDb } = require('../lib/db');
 const ingest = require('../ingest');
 
-const hfItem = (id, o = {}) => ({ id, createdAt: new Date().toISOString(), likes: 10, downloads: 1000, tags: ['text-generation', 'license:apache-2.0'], pipeline_tag: 'text-generation', ...o });
+const hfItem = (id, o = {}) => ({ id, createdAt: new Date().toISOString(), likes: 30, downloads: 5000, tags: ['text-generation', 'license:apache-2.0'], pipeline_tag: 'text-generation', ...o });
 const res = (body, ok = true, status = 200) => ({ ok, status, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)), headers: { get: () => null } });
 
 // Only the Hugging Face sources are exercised here; other sources are disabled so each test controls the traffic.
@@ -71,4 +71,40 @@ test('enrichModel fills exact parameter count from the model endpoint and backs 
   const bad = async () => { calls++; return res('x', false, 500); };
   await ingest.enrichModel(db, 'hf:other/model', bad); await ingest.enrichModel(db, 'hf:other/model', bad);
   assert.strictEqual(calls, 1, 'second attempt is suppressed by the backoff');
+});
+
+const orModel = (id, o = {}) => ({ id, canonical_slug: id, hugging_face_id: '', created: Math.floor(Date.now() / 1000) - 3600, context_length: 1000000,
+  architecture: { modality: 'text+image->text', input_modalities: ['text', 'image'], output_modalities: ['text'] }, pricing: { prompt: '0.000001', completion: '0.000005' }, supported_parameters: ['reasoning', 'tools'], ...o });
+
+test('OpenRouter adds closed models as Reported, skips variants, and never duplicates Hugging Face models', async () => {
+  const db = openDb(':memory:');
+  db.exec("update sources_config set enabled=0 where id!='openrouter-models'");
+  const f1 = async () => res({ data: [orModel('anthropic/claude-old', { created: 1700000000 })] });
+  await ingest.runAll(db, f1);
+  // a Hugging Face copy of an open model already exists
+  db.prepare("insert into models(id,name,org_id,verified,source_type) values('hf:qwen/open-one','qwen/open-one','hf',1,'huggingface')").run();
+  const f2 = async () => res({ data: [orModel('anthropic/claude-old', { created: 1700000000 }), orModel('anthropic/claude-new'), orModel('anthropic/claude-new:batch'), orModel('qwen/open-one', { hugging_face_id: 'qwen/open-one' }), orModel('openai/gpt-x', { architecture: { modality: 'text->text', input_modalities: ['text'], output_modalities: ['text'] } })] });
+  const out = await ingest.runAll(db, f2);
+  const m = db.prepare("select * from models where id='or:anthropic/claude-new'").get();
+  assert.ok(m, 'closed model stored');
+  assert.strictEqual(m.verification, 'reported');
+  assert.strictEqual(m.company_id, 'anthropic');
+  assert.strictEqual(m.ctx_tokens, 1000000);
+  assert.strictEqual(m.price_in, 1);
+  assert.strictEqual(m.price_out, 5);
+  assert.strictEqual(db.prepare("select count(*) n from models where id like 'or:%:batch'").get().n, 0, 'variants skipped');
+  assert.strictEqual(db.prepare("select count(*) n from models where id='or:qwen/open-one'").get().n, 0, 'no duplicate of a Hugging Face model');
+  assert.strictEqual(db.prepare("select ctx_tokens c from models where id='hf:qwen/open-one'").get().c, 1000000, 'context length attached to the Hugging Face model');
+  assert.ok(out.some(e => e.cat === 'Model Release'), 'new closed models raise a release signal');
+  assert.strictEqual(db.prepare("select verification v from events where model_id='or:anthropic/claude-new'").get().v, 'reported');
+});
+
+test('Hugging Face feeds skip unimportant community uploads but keep official labs', async () => {
+  const db = openDb(':memory:');
+  db.exec("update sources_config set enabled=0 where id!='hf-new-models'");
+  const items = [hfItem('rando/tiny-finetune', { likes: 0, downloads: 10 }), hfItem('Qwen/Qwen3-8B', { likes: 0, downloads: 10 }), hfItem('someone/popular', { likes: 500, downloads: 90000 })];
+  await ingest.runAll(db, async () => res(items));
+  const ids = db.prepare("select id from models").all().map(r => r.id);
+  assert.ok(!ids.includes('hf:rando/tiny-finetune'));
+  assert.ok(ids.includes('hf:Qwen/Qwen3-8B') && ids.includes('hf:someone/popular'));
 });
