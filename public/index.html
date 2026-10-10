@@ -1,184 +1,21 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signalstack</title>
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-:root{--side:#12372a;--bg:#f6f7f3;--card:#fff;--ink:#1d2622;--mut:#66736c;--line:#e2e6df;--acc:#1f7a4d;--amb:#e0a100;--red:#c0392b;--blu:#2b5fa8}
-*{box-sizing:border-box}body{margin:0;font:15px/1.5 Figtree,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
-a{color:var(--acc);cursor:pointer;text-decoration:none;font-weight:500}a:hover{text-decoration:underline}
-button,input,select{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:#fff;color:var(--ink)}
-button{cursor:pointer;font-weight:600}button.p{background:var(--acc);border-color:var(--acc);color:#fff}button.g{background:none;border:0;color:var(--mut)}
-:focus-visible{outline:2px solid var(--amb);outline-offset:2px}
-#auth{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}
-.hero{background:var(--side);color:#e8f2ec;padding:56px;display:flex;flex-direction:column;justify-content:center;gap:18px}
-.hero h1{font-size:34px;line-height:1.15;margin:0;max-width:16em}.hero p{color:#a9c4b7;max-width:30em;margin:0}.hero li{margin:6px 0;color:#cfe3d8}
-.form{display:flex;align-items:center;justify-content:center;padding:32px}.form form{width:100%;max-width:340px;display:grid;gap:12px}
-.form h2{margin:0}.err{color:var(--red);font-size:14px;min-height:20px}
-#app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
-aside{background:var(--side);color:#cfe3d8;padding:18px 12px;position:sticky;top:0;height:100vh;overflow:auto}
-aside b{display:block;color:#fff;font-size:18px;padding:0 10px 14px}aside small{display:block;margin:14px 10px 4px;color:#7fa593}
-aside a{display:block;color:#cfe3d8;padding:7px 10px;border-radius:8px;font-weight:400}aside a:hover{background:#1c4a3a;text-decoration:none}aside a.on{background:var(--amb);color:#1d2622;font-weight:600}
-.top{display:flex;gap:10px;align-items:center;padding:12px 24px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
-.top form{display:flex;gap:8px;flex:1;max-width:560px}.top input{flex:1}.top .u{margin-left:auto;color:var(--mut);font-size:14px}
-#menu{display:none}main{padding:24px;max-width:1080px}
-h1.t{font-size:26px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 18px}h3{margin:24px 0 10px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.stats .card b{font-size:28px;display:block}.stats span{color:var(--mut);font-size:14px}
-.ev{padding:12px 16px;border-bottom:1px solid var(--line);display:grid;gap:2px}.ev:last-child{border:0}.meta{color:var(--mut);font-size:13px}
-.pill{display:inline-block;font-size:12px;font-weight:600;border-radius:99px;padding:1px 9px;margin-right:6px;background:#eef1ec;color:var(--mut)}
-.Critical{background:#fbe4e1;color:var(--red)}.Major{background:#fdf0d0;color:#8a6200}.Important{background:#e3edf8;color:var(--blu)}.Research{background:#ece6f7;color:#5b3fb0}
-.Official,.Independent,.Reproduced{background:#dcf0e4;color:var(--acc)}.Self-reported{background:#fdf0d0;color:#8a6200}
-.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:560px}th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-size:13px;font-weight:600}
-.row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.warn{border:1px solid var(--amb);background:#fff8e4;border-radius:10px;padding:10px 14px;margin:10px 0;font-size:14px}
-.bar{height:10px;background:var(--acc);border-radius:5px}.bt{background:#eef1ec;border-radius:5px}
-.d{padding:8px 14px;border-bottom:1px solid var(--line);font-family:ui-monospace,monospace;font-size:13px}.added{background:#e3f4ea}.removed{background:#fbe4e1}.changed{background:#fff3cf}
-.note{background:#fff8e4;border-radius:8px;padding:6px 12px;font-size:13px;margin-bottom:16px}
-.badge-v{background:#fdf0d0;color:#8a6200;border-radius:99px;font-size:11px;padding:1px 8px;margin-left:6px}
-.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px}.kpi .card b{font-size:24px;display:block}
-.src{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}.src:last-child{border:0}
-.ok{color:var(--acc)}.errtxt{color:var(--red)}
-@media(max-width:800px){#auth{grid-template-columns:1fr}.hero{padding:28px}.hero h1{font-size:26px}#app{display:block}aside{display:none;position:static;height:auto}aside.o{display:block}#menu{display:block}.two{grid-template-columns:1fr}main{padding:16px}.top{padding:10px 14px}.top .u{display:none}}
-</style></head><body><div id="root"></div>
-<script>
-const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(p,method='GET',body){const r=await fetch('/api'+p,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const d=await r.json().catch(()=>({}));if(!r.ok){const e=Error(d.error||'Request failed');e.code=r.status;throw e}return d}
-let me=null,watch=[],mode='login',resetEmail='',inAuth=false,ST={counts:{}};
-const PRIV=['watchlist','alerts','admin'];
-const num=n=>{n=+n||0;return n>=1e6?(n/1e6).toFixed(1).replace('.0','')+'M':n>=1e3?(n/1e3).toFixed(1).replace('.0','')+'k':String(n)};
-const mid=id=>encodeURIComponent(id),empty=(t,m)=>`<h1 class="t">${t}</h1><div class="card">${m}</div>`;
-const srcLabel=u=>{try{const x=new URL(u);return x.hostname.replace(/^www\./,'')+(x.pathname.length>1?x.pathname.slice(0,40):'')}catch(e){return u||''}};
-const lk=(u,t)=>/^https?:\/\//i.test(u||'')?`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t||srcLabel(u))}</a>`:esc(u||'');
-const ago=iso=>{if(!iso)return'never';const m=Math.max(0,Math.round((Date.now()-new Date(iso))/6e4));return m<1?'just now':m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':Math.round(m/1440)+' d ago'};
-const known=v=>v&&!/^(unknown|not disclosed)$/i.test(v);
-function openAuth(m){mode=m;authView()}
-const gate=()=>`<div class="card"><h1 class="t">Log in to continue</h1><p class="sub">Create a free account or log in to follow models and set alerts.</p><div class="row" style="margin:0"><button class="p" onclick="openAuth('login')">Log in</button><button onclick="openAuth('signup')">Sign up</button></div></div>`;
-const pill=(t,c=t)=>`<span class="pill ${esc(c)}">${esc(t)}</span>`,fail=e=>`<div class="card"><b>Couldn't load this page.</b><p>${esc(e.message)} Check that the server is running, then <a onclick="route()">try again</a>.</p></div>`;
-// ---- auth ----
-function authView(msg=''){inAuth=true;const titles={login:'Log in',signup:'Create your account',forgot:'Reset your password',reset:'Enter your reset code'};
-$('#root').innerHTML=`<div id="auth"><div class="hero"><b style="font-size:20px">Signalstack</b><h1>Know what changed in AI before your team asks.</h1><p>One place for models, benchmarks, papers and documentation changes, with the source next to every number.</p><ul><li>Every score shows who measured it</li><li>Docs diffs between any two versions</li><li>Alerts that only fire on what matters</li></ul></div>
-<div class="form"><form id="af"><h2>${titles[mode]}</h2>
-${mode==='signup'?'<input name="name" placeholder="Your name" autocomplete="name">':''}
-${mode==='forgot'?'<p class="sub" style="margin:0">Enter your email and we\'ll send a 6-digit code.</p>':''}
-${mode==='reset'?`<p class="sub" style="margin:0">We sent a code to ${esc(resetEmail)}. It expires in 10 minutes.</p><input name="code" placeholder="6-digit code" required inputmode="numeric" pattern="[0-9]{6}">`:''}
-${mode!=='reset'?'<input name="email" type="email" placeholder="Email" required autocomplete="email" value="'+esc(resetEmail)+'">':'<input type="hidden" name="email" value="'+esc(resetEmail)+'">'}
-${(mode==='login'||mode==='signup')?`<input name="password" type="password" placeholder="Password (8+ characters)" required autocomplete="${mode==='login'?'current-password':'new-password'}">`:''}
-${mode==='reset'?'<input name="password" type="password" placeholder="New password (8+ characters)" required autocomplete="new-password">':''}
-${mode==='signup'?'<label style="display:flex;gap:8px;align-items:flex-start;font-size:14px;color:var(--mut)"><input type="checkbox" name="accept" required style="margin-top:3px;padding:0"><span>I have read and agree to the <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a> and the <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>':''}
-<div class="err" id="er">${msg?'':''}</div>${msg?`<div class="note">${esc(msg)}</div>`:''}
-<button class="p">${{login:'Log in',signup:'Sign up',forgot:'Send reset code',reset:'Reset password'}[mode]}</button>
-${mode==='login'?'<button type="button" class="g" id="fp">Forgot password?</button>':''}
-<button type="button" class="g" id="sw">${{login:'New here? Create an account',signup:'Already have an account? Log in',forgot:'Back to log in',reset:'Back to log in'}[mode]}</button>
-<p class="meta" style="text-align:center;margin:4px 0 0"><a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
-<button type="button" class="g" id="bk">← Back to the app</button>
-</form></div></div>`;
-$('#sw').onclick=()=>{mode=mode==='signup'?'login':mode==='login'?'signup':'login';authView()};
-const fp=$('#fp');if(fp)fp.onclick=()=>{mode='forgot';authView()};
-$('#bk').onclick=()=>{inAuth=false;shell();route()};
-$('#af').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
-try{
-if(mode==='forgot'){const r=await api('/forgot-password','POST',f);resetEmail=f.email;mode='reset';authView(r.message)}
-else if(mode==='reset'){await api('/reset-password','POST',f);mode='login';resetEmail='';authView('Password updated. Log in with your new password.')}
-else{if(mode==='signup')f.accept=f.accept==='on';await api('/'+mode,'POST',f);boot()}
-}catch(x){$('#er').textContent=x.message}}}
-// ---- shell ----
-const NAV=[['Main',[['overview','Overview'],['models','Models'],['benchmarks','Benchmarks'],['research','Research'],['live','Live changes'],['docs','Documentation']]],['Tools',[['compare','Compare models']]],['You',[['watchlist','Watchlist'],['alerts','Alerts']]]];
-function navFor(){const c=ST.counts||{},hide=[...(c.benchmarks?[]:['benchmarks']),...(c.docs?[]:['docs'])];
-const nav=NAV.map(([h,l])=>[h,l.filter(([k])=>!hide.includes(k))]);
-if(!me)return nav.filter(g=>g[0]!=='You');return me.role==='admin'?[...nav,['Admin',[['admin','Admin dashboard']]]]:nav}
-function shell(){inAuth=false;$('#root').innerHTML=`<div id="app"><aside id="sd"></aside><div><div class="top"><button id="menu">Menu</button><form id="sf"><input id="sq" type="search" placeholder="Search models, benchmarks, papers, events" aria-label="Search"><button class="p">Search</button></form>${me?`<span class="u">${esc(me.name||me.email)}${me.role==='admin'?' · admin':''}</span><button id="lo">Log out</button>`:`<span class="u"></span><button id="li">Log in</button><button class="p" id="su">Sign up</button>`}</div><main id="main"></main></div></div>`;
-$('#menu').onclick=()=>$('#sd').classList.toggle('o');$('#sf').onsubmit=e=>{e.preventDefault();location.hash='search/'+encodeURIComponent($('#sq').value)};
-if(me)$('#lo').onclick=async()=>{await api('/logout');me=null;watch=[];shell();route()};
-else{$('#li').onclick=()=>openAuth('login');$('#su').onclick=()=>openAuth('signup')}
-if(me&&'Notification' in window && Notification.permission==='default')setTimeout(()=>Notification.requestPermission(),1200);
-if(!window._poll)window._poll=setInterval(pollAlerts,60000)}
-async function pollAlerts(){if(!me||!('Notification' in window)||Notification.permission!=='granted')return;
-try{const d=await api('/alerts');const seen=+(localStorage.getItem('ss_seen')||0);const fresh=d.matches.filter(e=>e.id>seen);
-fresh.forEach(e=>new Notification('Signalstack: '+e.sev,{body:e.summary}));
-if(d.matches.length)localStorage.setItem('ss_seen',Math.max(...d.matches.map(e=>e.id)))}catch(e){}}
-const V={};
-V.overview=async()=>{const[st,ev,mo,pa]=await Promise.all([api('/status'),api('/events?limit=12'),api('/models?sort=new&limit=8'),api('/papers?limit=8')]);ST=st;const c=st.counts;
-return`<h1 class="t">What changed in AI</h1><p class="sub">Live from Hugging Face, arXiv, GitHub and lab blogs. Last update: ${esc(ago(st.lastUpdate))}.</p>${st.demo?'<div class="note"><b>Demo data.</b> Some items on this site are fictional.</div>':''}${c.models||c.papers?'':'<div class="note"><b>Collecting data…</b> The first update runs shortly after the server starts and can take a minute. Refresh in a moment.</div>'}<div class="stats">${[['Models tracked',c.models],['Events this week',c.eventsWeek],['Papers collected',c.papers]].map(x=>`<div class="card"><b>${num(x[1])}</b><span>${x[0]}</span></div>`).join('')}</div>
-<h3>Latest events <a href="#live" style="font-size:14px">See all</a></h3><div class="card" style="padding:0">${ev.map(evH).join('')||'<div class="ev">Nothing yet.</div>'}</div>
-<div class="two"><div><h3>Newest models <a href="#models" style="font-size:14px">Browse</a></h3><div class="card" style="padding:0">${mo.items.map(m=>`<div class="ev"><a href="#model/${esc(mid(m.id))}">${esc(m.name)}</a><div class="meta">${esc(m.uses[0]||'model')} · ${esc(m.rel)} · ${num(m.likes)} likes</div></div>`).join('')||'<div class="ev">Nothing yet.</div>'}</div></div>
-<div><h3>Newest papers <a href="#research" style="font-size:14px">Browse</a></h3><div class="card" style="padding:0">${pa.items.map(p=>`<div class="ev">${lk(p.url,p.title)}<div class="meta">${esc(p.arch)} · ${esc(p.date)}</div></div>`).join('')||'<div class="ev">Nothing yet.</div>'}</div></div></div>`};
-function evH(e){return`<div class="ev"><div>${pill(e.sev)}${e.cat!==e.sev?pill(e.cat):''}<span class="meta">${esc(e.ts)} · ${esc(e.org||'')}</span></div><div>${esc(e.summary)}</div><div class="meta">Source: ${lk(e.source)} ${e.model_id?`· <a href="#model/${esc(mid(e.model_id))}">${esc(e.model||'View model')}</a>`:''}</div></div>`}
-V.models=async()=>`<h1 class="t">Models</h1><p class="sub">Collected automatically from the Hugging Face Hub and refreshed every few minutes. Open a model to see its details.</p><div class="row"><input id="mf" placeholder="Search by name or task" style="flex:1;min-width:180px"><select id="msort" aria-label="Sort"><option value="likes">Most liked</option><option value="new">Newest</option><option value="downloads">Most downloaded</option></select><span class="meta" id="mcount"></span></div><div class="card tw" style="padding:0"><table><thead><tr><th>Model</th><th>Source</th><th>Task</th><th>Likes</th><th>Downloads</th><th>Released</th><th></th></tr></thead><tbody id="mt"></tbody></table></div><p><button id="mmore" style="display:none">Load more</button></p>`;
-const mq={q:'',sort:'likes',rows:[],total:0,tok:0};
-async function mrows(arg){const more=arg==='more',f=$('#mf'),so=$('#msort');if(!f||!$('#mt'))return;
-if(!more){mq.q=f.value.trim();mq.sort=so.value;mq.rows=[]}
-const tok=++mq.tok;let d;try{d=await api('/models?'+new URLSearchParams({q:mq.q,sort:mq.sort,limit:50,offset:mq.rows.length}))}catch(e){if(tok===mq.tok)$('#mt').innerHTML=`<tr><td colspan=7>${esc(e.message)}</td></tr>`;return}
-if(tok!==mq.tok||!$('#mt'))return;mq.total=d.total;mq.rows=mq.rows.concat(d.items);
-$('#mt').innerHTML=mq.rows.map(m=>`<tr><td><a href="#model/${esc(mid(m.id))}">${esc(m.name)}</a>${m.verified?'':'<span class="badge-v">Pending review</span>'}</td><td>${esc(m.org)}</td><td>${esc(m.uses[0]||'—')}</td><td>${num(m.likes)}</td><td>${num(m.downloads)}</td><td>${esc(m.rel)}</td><td><button data-w="${esc(m.id)}">${watch.includes(m.id)?'Watching':'Watch'}</button></td></tr>`).join('')||'<tr><td colspan=7>No models match your search.</td></tr>';
-$('#mcount').textContent=`Showing ${mq.rows.length.toLocaleString()} of ${mq.total.toLocaleString()}`;
-const mm=$('#mmore');mm.style.display=mq.rows.length<mq.total?'':'none';mm.onclick=()=>mrows('more');wire()}
-function resT(rs){if(!rs.length)return'<div class="card">No benchmark results yet. <a href="#benchmarks">Explore benchmarks</a></div>';
-const g={};rs.forEach(r=>(g[r.bench_id]=g[r.bench_id]||[]).push(r.score));
-return`<div class="card tw" style="padding:0"><table><tr><th>Benchmark</th><th>Score</th><th>Trust</th><th>Evaluator</th><th>Date</th><th>Source</th></tr>${rs.map(r=>`<tr><td>${esc(r.bname)} ${esc(r.bver)}</td><td><b>${r.score}</b></td><td>${pill(r.badge)}</td><td>${esc(r.evaluator)}</td><td>${esc(r.date)}</td><td>${esc(r.source)}</td></tr>`).join('')}</table></div>`+Object.entries(g).filter(([k,v])=>v.length>1&&new Set(v).size>1).map(([k,v])=>`<div class="warn"><b>Sources disagree</b> on ${esc(rs.find(r=>r.bench_id===k).bname)} ${esc(rs.find(r=>r.bench_id===k).bver)}: ${v.join(' vs ')}. Both are shown above.</div>`).join('')}
-V.model=async id=>{const d=await api('/models/'+id),m=d.model;
-const rows=[['Source',m.org],['Released',m.rel],['Likes',num(m.likes)],['Downloads',num(m.downloads)],['Architecture',m.arch],['Parameters',m.params],['Context',m.ctx],['Pricing',m.price]].filter(x=>known(x[1])&&x[1]!=='0');
-return`<h1 class="t">${esc(m.name)}${m.verified?'':'<span class="badge-v">Pending review</span>'}</h1><p class="sub">${esc(m.org)} · ${m.open?'Open weights':'Closed'} · released ${esc(m.rel)}${m.url?` · ${lk(m.url,'View on Hugging Face ↗')}`:''}</p><div class="two"><div class="card"><table style="min-width:0">${rows.map(x=>`<tr><td>${x[0]}</td><td>${esc(x[1])}</td></tr>`).join('')}</table></div><div class="card"><b>Tags</b><p>${m.uses.map(u=>pill(u)).join('')||'<span class="meta">No tags.</span>'}</p>${d.papers.length?`<b>Papers</b><p>${d.papers.map(p=>`<div>${lk(p.url,p.title)}<div class="meta">${esc(p.tldr)}</div></div>`).join('')}</p>`:''}<button data-w="${esc(m.id)}">${watch.includes(m.id)?'Watching':'Watch model'}</button></div></div>${d.results.length?`<h3>Benchmark results</h3>${resT(d.results)}`:''}<h3>Change history</h3><div class="card" style="padding:0">${d.events.map(evH).join('')||'<div class="ev">No changes recorded yet.</div>'}</div>`};
-V.compare=async()=>{if(!window._c){const t=await api('/models?sort=likes&limit=3');window._c=t.items.map(x=>x.id)}
-const D=(await Promise.all(window._c.map(i=>api('/models/'+mid(i)).catch(()=>null)))).filter(Boolean);
-return`<h1 class="t">Compare models</h1><p class="sub">Pick up to 4 models. Only facts that are actually known are shown.</p><div class="row">${D.map(d=>`<span class="pill">${esc(d.model.name)} <a data-cdel="${esc(d.model.id)}" title="Remove" style="cursor:pointer">✕</a></span>`).join('')}</div><div class="row"><input id="cq" placeholder="Add a model: type a name" style="flex:1;min-width:180px"></div><div id="cres" class="row"></div>
-<div class="card tw" style="padding:0"><table><tr><th></th>${D.map(d=>`<th>${esc(d.model.name)}</th>`).join('')}</tr>${[['Source','org'],['Task','uses0'],['Likes','likes'],['Downloads','downloads'],['Released','rel'],['Parameters','params'],['Context','ctx']].map(a=>`<tr><td>${a[0]}</td>${D.map(d=>{const m=d.model,v=a[1]==='uses0'?(m.uses[0]||''):['likes','downloads'].includes(a[1])?num(m[a[1]]):m[a[1]];return`<td>${known(v)?esc(v):'—'}</td>`}).join('')}</tr>`).join('')}</table></div>`};
-V.benchmarks=async id=>{const bs=await api('/benchmarks');if(!bs.length)return empty('Benchmarks','No benchmark data is connected yet.');id=id||bs[0].id;const d=await api('/benchmarks/'+id),b=d.benchmark;
-return`<h1 class="t">Benchmarks</h1><p class="sub">Pick a benchmark to see every result with its source.</p><div class="row"><select id="bs">${bs.map(x=>`<option value="${x.id}" ${x.id===id?'selected':''}>${esc(x.name)} ${esc(x.ver)} · ${esc(x.cat)}</option>`).join('')}</select></div><div class="card"><b>${esc(b.name)} ${esc(b.ver)}</b><p>${esc(b.descr)}</p><div class="meta">Method: ${esc(b.meth)}</div></div><h3>Results</h3><div class="card tw" style="padding:0"><table><tr><th>Model</th><th>Score</th><th>Trust</th><th>Evaluator</th><th>Date</th><th>Source</th></tr>${d.results.map(r=>`<tr><td><a href="#model/${esc(r.model_id)}">${esc(r.mname)}</a></td><td><b>${r.score}</b></td><td>${pill(r.badge)}</td><td>${esc(r.evaluator)}</td><td>${esc(r.date)}</td><td>${esc(r.source)}</td></tr>`).join('')||'<tr><td colspan=6>No results yet for this benchmark.</td></tr>'}</table></div>`};
-V.research=async()=>`<h1 class="t">Research</h1><p class="sub">Recent papers from arXiv (language, machine learning, AI and vision), refreshed every few minutes.</p><div class="row"><input id="pf" placeholder="Search title, abstract, author or category" style="flex:1;min-width:180px"><span class="meta" id="pcount"></span></div><div class="card" style="padding:0" id="pl"></div><p><button id="pmore" style="display:none">Load more</button></p>`;
-const pq={q:'',rows:[],total:0,tok:0};
-async function prows(arg){const more=arg==='more',f=$('#pf');if(!f||!$('#pl'))return;if(!more){pq.q=f.value.trim();pq.rows=[]}
-const tok=++pq.tok;let d;try{d=await api('/papers?'+new URLSearchParams({q:pq.q,limit:30,offset:pq.rows.length}))}catch(e){if(tok===pq.tok)$('#pl').innerHTML=`<div class="ev">${esc(e.message)}</div>`;return}
-if(tok!==pq.tok||!$('#pl'))return;pq.total=d.total;pq.rows=pq.rows.concat(d.items);
-$('#pl').innerHTML=pq.rows.map(x=>`<div class="ev"><b>${lk(x.url,x.title)}</b>${x.verified?'':'<span class="badge-v">Pending review</span>'}<div class="meta">${esc(x.date)} · ${esc(x.arch)}${x.authors?' · '+esc(x.authors):''}</div><div>${esc((x.tldr||'').slice(0,300))}${(x.tldr||'').length>300?'…':''}</div>${x.model_ids?`<div>${x.model_ids.split(',').filter(Boolean).map(i=>`<a href="#model/${esc(mid(i))}">${esc(i)}</a>`).join(' · ')}</div>`:''}</div>`).join('')||'<div class="ev">No papers match your search.</div>';
-$('#pcount').textContent=`Showing ${pq.rows.length.toLocaleString()} of ${pq.total.toLocaleString()}`;
-const pm=$('#pmore');pm.style.display=pq.rows.length<pq.total?'':'none';pm.onclick=()=>prows('more')}
-V.live=async()=>{const o=window._lo||'',s=window._ls||'';const[orgs,ev]=await Promise.all([api('/orgs'),api('/events?'+new URLSearchParams({...(o&&{org:o}),...(s&&{sev:s})}))]);
-return`<h1 class="t">Live changes</h1><p class="sub">Newest first.</p><div class="row"><select id="lo2"><option value="">All organizations</option>${orgs.map(x=>`<option value="${x.id}" ${o===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select><select id="ls2"><option value="">All severities</option>${['Critical','Major','Important','Normal','Research'].map(x=>`<option ${s===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="card" style="padding:0">${ev.map(evH).join('')||'<div class="ev">No events match. Clear a filter.</div>'}</div>`};
-V.docs=async()=>{const vs=await api('/docs');if(!vs.length)return empty('Documentation','No documentation changes are tracked yet.');const a=window._da||(vs[1]||vs[0]).version,b=window._db||vs[0].version,d=await api(`/docs/diff?a=${a}&b=${b}`);const op=v=>vs.map(x=>`<option ${x.version===v?'selected':''}>${x.version}</option>`).join('');
-return`<h1 class="t">Documentation</h1><p class="sub">Aster API, Chat Completions (demo page)</p><div class="row">Compare <select id="da">${op(a)}</select> and <select id="db">${op(b)}</select> ${pill(d.severity,d.severity==='Breaking'?'Critical':'Important')}</div><div class="card" style="padding:0">${d.changes.map(c=>`<div class="d ${c.t}">${c.t.toUpperCase()}: ${esc(c.text)}</div>`).join('')||'<div class="d">No differences.</div>'}</div><h3>Version history</h3><div class="card" style="padding:0">${vs.map(v=>`<div class="ev"><b>${v.version}</b><span class="meta">${v.date}</span></div>`).join('')}</div>`};
-V.watchlist=async()=>{const m=watch.length?(await api('/models?ids='+watch.map(encodeURIComponent).join(','))).items:[];return`<h1 class="t">Watchlist</h1><p class="sub">Models you follow.</p><div class="card" style="padding:0">${m.map(x=>`<div class="ev"><a href="#model/${esc(mid(x.id))}">${esc(x.name)}</a> <button data-w="${esc(x.id)}">Remove</button></div>`).join('')||'<div class="ev">You are not watching any models. <a href="#models">Browse models</a></div>'}</div>`};
-V.alerts=async()=>{const[d,orgs]=await Promise.all([api('/alerts'),api('/orgs')]);const nperm=('Notification' in window)?Notification.permission:'unsupported';
-return`<h1 class="t">Alerts</h1><p class="sub">Only events at or above your severity are matched.</p><div class="note">Browser notifications fire while this tab is open (permission: ${esc(nperm)}). Email alerts need RESEND_API_KEY set by your admin — check the admin dashboard for status.</div><div class="row"><select id="ao"><option value="">Any organization</option>${orgs.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select><select id="ac"><option value="">Any category</option>${['Model Release','Trending','Announcement','Open Source','Research','Documentation','Pricing','Benchmark'].map(x=>`<option>${x}</option>`).join('')}</select><select id="as"><option>All</option><option>Major only</option><option>Critical only</option></select><label><input type="checkbox" id="ae"> Also email me</label><button class="p" id="aa">Create alert</button></div><div class="card" style="padding:0">${d.alerts.map(a=>`<div class="ev">${esc(a.org_id||'Any org')} · ${esc(a.cat||'Any category')} · ${esc(a.minsev)} ${a.channel==='app+email'?pill('Email','ok'):''} <button data-ad="${a.id}">Delete</button></div>`).join('')||'<div class="ev">No alerts yet. Create one above.</div>'}</div><h3>Matching events</h3><div class="card" style="padding:0">${d.matches.map(evH).join('')||'<div class="ev">Nothing matches yet.</div>'}</div>`};
-V.search=async q=>{q=decodeURIComponent(q||'');$('#sq').value=q;const r=await api('/search?q='+encodeURIComponent(q));const S=(t,l)=>`<h3>${t} (${l.length})</h3><div class="card">${l.join('<br>')||'No matches.'}</div>`;
-return`<h1 class="t">Search results</h1><p class="sub">${q.length<2?'Type at least 2 characters and press Search.':'Results for “'+esc(q)+'”'}</p>${q.length<2?'':S('Models',r.models.map(x=>`<a href="#model/${esc(mid(x.id))}">${esc(x.name)}</a>`))+S('Benchmarks',r.benchmarks.map(x=>`<a href="#benchmarks/${esc(x.id)}">${esc(x.name)} ${esc(x.ver)}</a>`))+S('Papers',r.papers.map(x=>lk(x.url,x.title)))+S('Events',r.events.map(x=>esc(x.summary)))}`};
-V.admin=async()=>{const[s,log,pend,users]=await Promise.all([api('/admin/summary'),api('/admin/log'),api('/admin/pending'),api('/admin/users')]);
-return`<h1 class="t">Admin dashboard</h1><p class="sub">System health, ingestion sources and review queue.</p>
-<div class="kpi">${[['Users',s.users],['Models',s.models],['Papers',s.papers],['Events',s.events],['Pending review',s.pendingModels+s.pendingPapers],['Emails sent',s.emailsSent],['Emails failed',s.emailsFailed]].map(x=>`<div class="card"><b>${x[1]}</b><span class="meta">${x[0]}</span></div>`).join('')}</div>
-${s.emailConfigured?'':'<div class="warn">Email is not configured. Set RESEND_API_KEY (free at resend.com) in the environment to enable email alerts.</div>'}
-<h3>Test email</h3><div class="row"><input id="temail" type="email" placeholder="Send a test email to..."><button id="tsend">Send test email</button></div><div id="tresult"></div>
-<h3>Monitored sources <button id="runnow">Run ingestion now</button></h3>
-<div class="card" style="padding:0">${s.sources.map(x=>`<div class="src"><div><b>${esc(x.label)}</b><div class="meta">${esc(x.kind)} · last run: ${x.last_run?esc(x.last_run):'never'} · <span class="${x.last_status==='error'?'errtxt':'ok'}">${esc(x.last_status||'—')}</span>${x.last_error?' — '+esc(x.last_error):''}</div></div><button data-src="${x.id}" data-on="${x.enabled?'0':'1'}">${x.enabled?'Disable':'Enable'}</button></div>`).join('')}</div>
-<h3>Pending review</h3><div class="two">
-<div class="card"><b>Models (${pend.models.length})</b> ${pend.models.length?`<button data-bulk="model" data-bulkact="approve">Approve all</button> <button data-bulk="model" data-bulkact="reject">Reject all</button>`:''}${pend.models.map(m=>`<div class="ev">${esc(m.name)}<div><button data-rev="${m.id}" data-type="model" data-act="approve">Approve</button> <button data-rev="${m.id}" data-type="model" data-act="reject">Reject</button></div></div>`).join('')||'<div class="ev">Nothing pending.</div>'}</div>
-<div class="card"><b>Papers (${pend.papers.length})</b> ${pend.papers.length?`<button data-bulk="paper" data-bulkact="approve">Approve all</button> <button data-bulk="paper" data-bulkact="reject">Reject all</button>`:''}${pend.papers.map(p=>`<div class="ev">${esc(p.title)}<div><button data-rev="${p.id}" data-type="paper" data-act="approve">Approve</button> <button data-rev="${p.id}" data-type="paper" data-act="reject">Reject</button></div></div>`).join('')||'<div class="ev">Nothing pending.</div>'}</div></div>
-<h3>Ingestion log</h3><div class="card tw" style="padding:0"><table><tr><th>Time</th><th>Source</th><th>Status</th><th>Message</th></tr>${log.map(l=>`<tr><td>${esc(l.ts.replace('T',' ').slice(0,16))}</td><td>${esc(l.source_id)}</td><td>${pill(l.status==='error'?'Critical':l.status==='ok'?'Official':'Normal')}</td><td>${esc(l.message)}</td></tr>`).join('')||'<tr><td colspan=4>No ingestion runs yet.</td></tr>'}</table></div>
-<h3>Users</h3><div class="card" style="padding:0" id="prole">${users.map(u=>`<div class="ev">${esc(u.email)} ${u.role==='admin'?pill('admin'):''} ${u.role==='admin'?`<button data-id="${u.id}" data-role="user">Demote</button>`:`<button data-id="${u.id}" data-role="admin">Make admin</button>`}</div>`).join('')}</div>`};
-// ---- routing ----
-async function route(){const[r,a]=(location.hash.slice(1)||'overview').split('/'),on=r==='model'?'models':r==='search'?'':r;
-$('#sd').innerHTML='<b>Signalstack</b>'+navFor().map(([h,l])=>`<small>${h}</small>`+l.map(([k,n])=>`<a href="#${k}" class="${k===on?'on':''}">${n}</a>`).join('')).join('');$('#sd').classList.remove('o');
-$('#main').innerHTML='<div class="card"><div style="height:14px;background:#eef1ec;border-radius:6px;width:40%"></div><div style="height:14px;background:#eef1ec;border-radius:6px;margin-top:12px"></div><div style="height:14px;background:#eef1ec;border-radius:6px;margin-top:12px;width:70%"></div></div>';
-if(!me&&PRIV.includes(r)){$('#main').innerHTML=gate();return}
-try{$('#main').innerHTML=V[r]?await V[r](a):'<h1 class="t">Page not found</h1><a href="#overview">Go to overview</a>';if(r==='models')mrows();if(r==='research')prows()}catch(e){if(e.code===401){if(me){me=null;watch=[];shell();return route()}$('#main').innerHTML=gate();return}$('#main').innerHTML=fail(e)}
-wire()}
-function wire(){document.querySelectorAll('[data-w]').forEach(b=>b.onclick=async()=>{if(!me)return openAuth('login');const id=b.dataset.w;watch=await api('/watchlist',watch.includes(id)?'DELETE':'POST',{model_id:id});route()});
-document.querySelectorAll('[data-c]').forEach(c=>c.onchange=()=>{const s=window._c;window._c=c.checked?[...s,c.dataset.c]:s.filter(x=>x!==c.dataset.c);route()});
-document.querySelectorAll('[data-ad]').forEach(b=>b.onclick=async()=>{await api('/alerts','DELETE',{id:+b.dataset.ad});route()});
-const on=(id,f)=>{const e=$(id);if(e)e.onchange=()=>f(e.value)};on('#bs',v=>location.hash='benchmarks/'+v);on('#lo2',v=>{window._lo=v;route()});on('#ls2',v=>{window._ls=v;route()});on('#da',v=>{window._da=v;route()});on('#db',v=>{window._db=v;route()});
-const mf=$('#mf');if(mf){mf.oninput=()=>{clearTimeout(window._mtm);window._mtm=setTimeout(mrows,250)};$('#msort').onchange=()=>mrows()}
-const pf=$('#pf');if(pf)pf.oninput=()=>{clearTimeout(window._ptm);window._ptm=setTimeout(prows,250)};
-document.querySelectorAll('[data-cdel]').forEach(a=>a.onclick=()=>{window._c=window._c.filter(x=>x!==a.dataset.cdel);route()});
-const cq=$('#cq');if(cq)cq.oninput=()=>{clearTimeout(window._ctm);window._ctm=setTimeout(async()=>{const t=cq.value.trim();if(t.length<2){$('#cres').innerHTML='';return}const d=await api('/models?'+new URLSearchParams({q:t,sort:'likes',limit:8}));
-$('#cres').innerHTML=d.items.map(m=>`<button data-cadd="${esc(m.id)}">${esc(m.name)}</button>`).join('')||'<span class="meta">No matches.</span>';
-document.querySelectorAll('[data-cadd]').forEach(b=>b.onclick=()=>{if(!window._c.includes(b.dataset.cadd)&&window._c.length<4)window._c.push(b.dataset.cadd);route()})},250)};const aa=$('#aa');if(aa)aa.onclick=async()=>{await api('/alerts','POST',{org_id:$('#ao').value,cat:$('#ac').value,minsev:$('#as').value,channel:$('#ae').checked?'app+email':'app'});route()};
-document.querySelectorAll('[data-rev]').forEach(b=>b.onclick=async()=>{await api('/admin/review','POST',{type:b.dataset.type,id:b.dataset.rev,action:b.dataset.act});route()});
-document.querySelectorAll('[data-bulk]').forEach(b=>b.onclick=async()=>{
-if(b.dataset.bulkact==='reject'&&!confirm('Reject and permanently delete all pending '+b.dataset.bulk+'s?'))return;
-await api('/admin/review/bulk','POST',{type:b.dataset.bulk,action:b.dataset.bulkact});route()});
-document.querySelectorAll('[data-src]').forEach(b=>b.onclick=async()=>{await api('/admin/sources','POST',{id:b.dataset.src,enabled:b.dataset.on==='1'});route()});
-const run=$('#runnow');if(run)run.onclick=async()=>{run.textContent='Running…';run.disabled=true;await api('/admin/ingest/run','POST');setTimeout(route,3000)};
-const tsend=$('#tsend');if(tsend)tsend.onclick=async()=>{const to=$('#temail').value;if(!to)return;tsend.disabled=true;tsend.textContent='Sending…';
-try{const r=await api('/admin/test-email','POST',{to});$('#tresult').innerHTML=`<div class="note">Sent successfully. Check ${esc(to)}'s inbox (and spam folder).</div>`}
-catch(e){$('#tresult').innerHTML=`<div class="warn">Failed: ${esc(e.message)}</div>`}
-tsend.disabled=false;tsend.textContent='Send test email'};
-const prole=$('#prole');if(prole)prole.onclick=async e=>{if(e.target.dataset.role){await api('/admin/users/role','POST',{id:+e.target.dataset.id,role:e.target.dataset.role});route()}}}
-async function boot(){me=null;watch=[];try{ST=await api('/status')}catch(e){}try{me=await api('/me')}catch(e){}if(me){try{watch=await api('/watchlist')}catch(e){}}shell();route()}
-addEventListener('hashchange',()=>{if(!inAuth)route()});boot();
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050a16">
+<meta name="description" content="Signalstack tracks new AI models, research papers and releases from their original sources, with the source shown next to every item.">
+<title>Signalstack</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div id="root"></div>
+<dialog id="authdlg" aria-labelledby="authtitle"></dialog>
+<noscript><p style="padding:24px">Signalstack needs JavaScript to run.</p></noscript>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
