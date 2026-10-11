@@ -11,6 +11,7 @@ import * as search from './views/search.js';
 import * as you from './views/you.js';
 import * as extras from './views/extras.js';
 import * as admin from './views/admin.js';
+import * as coverage from './views/coverage.js';
 
 const ICON = {
   now: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', models: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>',
@@ -23,7 +24,7 @@ const rawSvg = k => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 const VIEWS = {
   now: [home, 'now'], signals: [signals, 'signals'], models: [models, 'models'], model: [model, 'models'], research: [research, 'research'],
   search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], compare: [extras.compare, 'you'],
-  benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
+  benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'], coverage: [coverage, 'you'],
 };
 const NAV = [['now', 'Home'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
 const PRIVATE = ['watchlist', 'alerts', 'admin'];

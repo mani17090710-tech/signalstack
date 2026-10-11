@@ -180,3 +180,14 @@ The tests use mock network responses; no live calls are made.
   link to the lab's own announcement and is badged Verified. See `data/README.md` for the format. Invalid entries
   are skipped and reported in Admin > Monitored sources.
 - The thresholds are in each source's `config` row in `sources_config` (`minLikes`, `minDownloads`).
+
+## Discovery vs verification
+
+Finding a model and confirming it are stored separately. `model_sources` records where a model was discovered (Hugging Face, OpenRouter, the hand-kept list). `model_evidence` records provider confirmation, and it is the only thing that sets the status:
+
+- **Verified**: an official announcement or documentation page (from `data/curated-models.json`).
+- **Source verified**: comes from the original publisher, e.g. a tracked lab's own Hugging Face account, or arXiv.
+- **Aggregator listed**: found in a catalogue such as OpenRouter; not checked against the provider.
+- **Unverified**: no reliable evidence.
+
+The same model found through several sources is one canonical record. Model-to-paper links (`model_papers`) need evidence: the model's HF tags, the provider's announcement, or the paper naming the exact `org/name` id. The app's `#coverage` page and `/api/coverage` describe this live. Everything works without any LLM key.

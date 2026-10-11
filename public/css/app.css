@@ -67,8 +67,9 @@ section.blk > header h2 { font-size: 18px; }
 .tag.co { color: var(--ink); } a.tag:hover { text-decoration: none; border-color: var(--cy2); }
 .ver { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px; border: 1px solid; white-space: nowrap; }
 .ver-verified { color: var(--ok); border-color: rgba(61, 220, 151, .4); background: rgba(61, 220, 151, .08); }
-.ver-reported { color: var(--warn); border-color: rgba(242, 184, 75, .4); background: rgba(242, 184, 75, .08); }
-.ver-community { color: var(--blu); border-color: rgba(91, 157, 255, .4); background: rgba(91, 157, 255, .08); }
+.ver-source_verified { color: #6fd3c0; border-color: rgba(111, 211, 192, .4); background: rgba(111, 211, 192, .08); }
+.ver-aggregator { color: var(--blu); border-color: rgba(91, 157, 255, .4); background: rgba(91, 157, 255, .08); }
+.ver-unverified { color: #9aa6bd; border-color: rgba(154, 166, 189, .4); background: rgba(154, 166, 189, .08); }
 .imp { font-size: 12px; color: var(--dim); } .imp-Major { color: var(--cy); font-weight: 600; } .imp-Important { color: var(--ink); }
 .legend { color: var(--mut); font-size: 14px; margin-bottom: 18px; }
 .legend summary { cursor: pointer; color: var(--cy); width: fit-content; }
@@ -174,3 +175,4 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
 @media (prefers-reduced-motion: reduce) { .sk i { animation: none; } * { scroll-behavior: auto !important; transition: none !important; } }
 .mt { margin-top: 24px; }
 .warn-t { color: var(--warn); }
+ul.plain{list-style:none;margin:4px 0 12px;padding:0}ul.plain li{padding:2px 0}

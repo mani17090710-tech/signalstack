@@ -29,3 +29,10 @@ Leave out anything the announcement does not state; it will show as "Not availab
 
 Rules: an entry is skipped if OpenRouter already lists the same `id`. Invalid entries are skipped and reported in
 Admin > Monitored sources. The file is re-read every ingestion cycle, so redeploy after editing it.
+
+## Extra fields
+
+- `docs_url` (https): the provider's documentation page for the model. Adds `official_documentation` evidence.
+- `aliases` (array of strings): other ids the same model is known by (for example dated snapshots), so catalogue listings merge into this record instead of creating a duplicate.
+- `capabilities` (array of strings): only capabilities the provider states.
+- `papers` (array of arXiv ids): papers the provider's announcement lists. Never add a paper just because the names look alike.

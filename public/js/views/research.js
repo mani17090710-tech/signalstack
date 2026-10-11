@@ -5,10 +5,10 @@ let COMPANY_NAMES = {};
 const f = { q: '', company: '' };
 let rows = 0, total = 0, token = 0;
 
-const paper = p => html`<article class="sig"><div class="sig-main"><div class="tags"><span class="tag">${p.category || 'Paper'}</span>${p.entities.map(c => html`<a class="tag co" href="#company/${c}">${COMPANY_NAMES[c] || c}</a>`)}${verBadge(p.verification)}</div>
+const paper = p => html`<article class="sig"><div class="sig-main"><div class="tags"><span class="tag">${p.categories ? p.categories.split(',').join(', ') : p.category || 'Paper'}</span>${p.entities.map(c => html`<a class="tag co" href="#company/${c}">${COMPANY_NAMES[c] || c}</a>`)}${verBadge(p.verification)}</div>
   <h3>${safeUrl(p.url) ? html`<a href="${p.url}" target="_blank" rel="noopener noreferrer">${p.title}</a>` : p.title}</h3>
   ${p.authors ? html`<p class="detail">${p.authors}</p>` : ''}${p.summary ? html`<p class="detail">${p.summary.slice(0, 280)}${p.summary.length > 280 ? '…' : ''}</p>` : ''}
-  <p class="src"><span>${host(p.url) || 'arXiv'}</span><span>Published ${stamp(p.published_at)}</span><span>Checked ${ago(p.retrieved_at)}</span></p></div></article>`;
+  <p class="src"><span>${p.arxiv_id ? 'arXiv ' + p.arxiv_id : host(p.url) || 'arXiv'}, primary source</span><span>Published ${stamp(p.published_at)}</span><span>Checked ${ago(p.retrieved_at)}</span></p></div></article>`;
 
 export async function render() {
   const cos = await api('/companies');

@@ -1,5 +1,5 @@
 // Live Signals: everything new, with time-window, type, lab and verification filters.
-import { api, html, pageHead, signalCard, empty, checked, verLegend, skeleton, mount, $, SIGNAL_LABEL } from '../lib.js';
+import { VER, api, html, pageHead, signalCard, empty, checked, verLegend, skeleton, mount, $, SIGNAL_LABEL } from '../lib.js';
 
 const WINDOWS = [['1h', 'Last hour'], ['6h', '6 hours'], ['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']];
 const f = { window: '24h', cat: '', company: '', verification: '', sort: 'time' };
@@ -15,7 +15,7 @@ export async function render() {
       <div class="toolbar">
         <select id="fc" aria-label="Type"><option value="">All types</option>${facets.cats.map(c => html`<option value="${c.name}" ${f.cat === c.name ? 'selected' : ''}>${SIGNAL_LABEL[c.name] || c.name}</option>`)}</select>
         <select id="fco" aria-label="Lab"><option value="">All labs</option>${facets.companies.map(c => html`<option value="${c.id}" ${f.company === c.id ? 'selected' : ''}>${c.name}</option>`)}</select>
-        <select id="fv" aria-label="Verification"><option value="">Any verification</option>${['verified', 'reported', 'community'].map(v => html`<option value="${v}" ${f.verification === v ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`)}</select>
+        <select id="fv" aria-label="Verification"><option value="">Any verification</option>${['verified', 'source_verified', 'aggregator'].map(v => html`<option value="${v}" ${f.verification === v ? 'selected' : ''}>${VER[v][1]}</option>`)}</select>
         <select id="fs" aria-label="Sort"><option value="time">Newest first</option><option value="score" ${f.sort === 'score' ? 'selected' : ''}>Highest score</option></select></div>
       <div id="list">${skeleton(3)}</div><p><button id="more" hidden>Show more</button></p>`,
     after(root) {
