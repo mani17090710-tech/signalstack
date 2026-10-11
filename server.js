@@ -6,6 +6,7 @@ const { COMPANIES, byId: COMPANY } = require('./lib/companies');
 const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
 const { scoreSignal, SIGNIFICANT } = require('./lib/score');
+const { LEVELS } = require('./lib/verify');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
 
@@ -93,11 +94,15 @@ function modelOut(m) {
     license: m.license || null, pipeline: m.pipeline || null, library: m.library || null, arch: m.arch || null,
     cats: (m.cats || '').split(',').filter(Boolean), params: m.params_label || null, param_count: m.param_count || null,
     gated: !!m.gated, likes: m.likes || 0, downloads: m.downloads || 0, url: m.url || null, arxiv: m.arxiv || null,
-    verification: m.verification || 'community', source_type: m.source_type || 'huggingface', trend_rank: m.trend_rank || null,
+    verification: m.verification || 'unverified', verified_at: m.verified_at || null, source_type: m.source_type || 'huggingface', trend_rank: m.trend_rank || null,
+    closed: String(m.id).startsWith('cm:'), official_url: m.official_url || null, capabilities: (m.capabilities || '').split(',').filter(Boolean),
+    ctx_source: m.ctx_source || null, price_source: m.price_source || null,
     context_length: m.ctx_tokens || null, price_in: m.price_in ?? null, price_out: m.price_out ?? null, modality: m.modality || null,
   };
 }
 const M_SELECT = 'select m.* from models m';
+// Closed models that no catalogue has listed for 45 days are treated as delisted and hidden.
+const LIVE = "(m.id not like 'cm:%' or exists(select 1 from model_sources s where s.model_id=m.id and substr(s.last_seen,1,10)>=date('now','-45 day')))";
 
 const signalRows = (where, args, limit) => db.prepare(`select e.*, m.likes mlikes, m.downloads mdownloads, m.param_count mparams, m.released_at mreleased, m.company_id mcompany, m.name mname, m.verification mver, m.source_type msrc, m.ctx_tokens mctx
   from events e left join models m on m.id=e.model_id where ${EV_OK} ${where} order by e.ts desc limit ${limit}`).all(...args);
@@ -105,12 +110,12 @@ const signalRows = (where, args, limit) => db.prepare(`select e.*, m.likes mlike
 function signalOut(e) {
   const meta = parseJson(e.meta, {}), co = e.company_id ? byId(e.company_id) : null;
   const sc = scoreSignal({
-    cat: e.cat, ts: e.ts, companyName: co && co.name, meta, mentions: meta.mentions, tier: meta.tier || (e.verification === 'verified' ? 'primary' : null),
-    model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, released_at: e.mreleased, company_id: e.mcompany, adoption: !['openrouter', 'curated'].includes(e.msrc), ctx_tokens: e.mctx } : null,
+    cat: e.cat, ts: e.ts, companyName: co && co.name, meta, mentions: meta.mentions, tier: meta.tier || (['verified', 'source_verified'].includes(e.verification) ? 'primary' : null),
+    model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, released_at: e.mreleased, company_id: e.mcompany, adoption: !String(e.model_id || '').startsWith('cm:'), ctx_tokens: e.mctx } : null,
   });
   return {
     id: e.id, ts: e.ts, cat: e.cat, title: e.title || e.summary, summary: e.summary, detail: e.detail || null, url: e.source || null,
-    source_type: e.source_type || null, verification: e.verification || 'community', retrieved_at: e.retrieved_at || null,
+    source_type: e.source_type || null, verification: e.verification || 'unverified', retrieved_at: e.retrieved_at || null,
     company_id: e.company_id || null, company: co ? co.name : null, model_id: e.model_id || null, model: e.mname || null,
     score: sc.score, importance: sc.importance, parts: sc.parts, why: sc.why, meta,
   };
@@ -171,7 +176,7 @@ get(/^\/api\/now$/, () => {
   const day = signals(new URLSearchParams('window=24h')), week = signals(new URLSearchParams('window=7d'));
   const pool = day.length >= 5 ? day : week;
   const top = [...pool].sort((a, b) => b.score - a.score).slice(0, 6);
-  const newModels = db.prepare(M_SELECT + " where m.verified=1 and m.company_id is not null order by coalesce(m.released_at,m.rel) desc limit 8").all().map(modelOut);
+  const newModels = db.prepare(M_SELECT + " where m.verified=1 and m.company_id is not null and " + LIVE + " order by coalesce(m.released_at,m.rel) desc limit 8").all().map(modelOut);
   const trending = db.prepare(M_SELECT + " where m.verified=1 and m.trend_rank is not null and m.trend_at>=datetime('now','-2 day') order by m.trend_rank limit 8").all().map(modelOut);
   const papers = db.prepare("select id,title,authors,published_at,date,url,entities,verification,retrieved_at from papers where verified=1 order by coalesce(published_at,date) desc limit 6").all()
     .map(p => ({ ...p, entities: parseJson(p.entities, []) }));
@@ -202,29 +207,32 @@ get(/^\/api\/models$/, ({ q }) => {
   const cat = (q.get('cat') || '').replace(/[^a-z]/g, ''), co = q.get('company'), lic = q.get('license');
   const where = ` where m.verified=1 and (?1 is null or m.name like ?1 escape '\\') and (?2 is null or m.id in (select value from json_each(?2)))
     and (?3 is null or m.cats like ?3) and (?4 is null or m.company_id=?4) and (?5 is null or m.license=?5)
-    and (?6 is null or m.pipeline=?6) and (?7=0 or m.company_id is not null) and (?8 is null or m.source_type=?8 or (?8='api' and m.source_type in ('openrouter','curated')))`;
-  const a = [t ? likeOf(t) : null, ids.length ? JSON.stringify(ids) : null, cat ? '%,' + cat + ',%' : null, co || null, lic || null, q.get('task') || null, q.get('official') === '1' ? 1 : 0, ['huggingface', 'openrouter', 'curated'].includes(q.get('source')) ? q.get('source') : q.get('source') === 'api' ? 'api' : null];
+    and (?6 is null or m.pipeline=?6) and (?7=0 or m.company_id is not null) and (?8 is null or (?8='api' and m.id like 'cm:%') or (?8='huggingface' and m.id like 'hf:%'))
+    and (?9 is null or m.verification=?9) and ${LIVE}`;
+  const a = [t ? likeOf(t) : null, ids.length ? JSON.stringify(ids) : null, cat ? '%,' + cat + ',%' : null, co || null, lic || null, q.get('task') || null, q.get('official') === '1' ? 1 : 0, ['huggingface', 'api'].includes(q.get('source')) ? q.get('source') : null, LEVELS[q.get('verification')] ? q.get('verification') : null];
   const order = MODEL_ORDER[q.get('sort')] || MODEL_ORDER.new;
   return {
     total: db.prepare('select count(*) c from models m' + where).get(...a).c,
-    items: db.prepare(M_SELECT + where + ` order by ${order}, m.rowid desc limit ?9 offset ?10`).all(...a, limit, offset).map(modelOut),
+    items: db.prepare(M_SELECT + where + ` order by ${order}, m.rowid desc limit ?10 offset ?11`).all(...a, limit, offset).map(modelOut),
   };
 });
 // Facets are computed over all models so the category tabs and filters show real counts (empty categories can be hidden).
 get(/^\/api\/models\/facets$/, () => {
-  const rows = db.prepare("select cats,company_id,license,pipeline from models where verified=1").all(), cats = {}, cos = {}, lic = {}, tasks = {};
+  const rows = db.prepare("select cats,company_id,license,pipeline,verification,id from models m where verified=1 and " + LIVE).all(), cats = {}, cos = {}, lic = {}, tasks = {}, ver = {};
   for (const r of rows) {
     (r.cats || '').split(',').filter(Boolean).forEach(c => { cats[c] = (cats[c] || 0) + 1; });
     if (r.company_id) cos[r.company_id] = (cos[r.company_id] || 0) + 1;
     if (r.license) lic[r.license] = (lic[r.license] || 0) + 1;
     if (r.pipeline) tasks[r.pipeline] = (tasks[r.pipeline] || 0) + 1;
+    ver[r.verification || 'unverified'] = (ver[r.verification || 'unverified'] || 0) + 1;
   }
   const top = (o, n) => Object.entries(o).sort((x, y) => y[1] - x[1]).slice(0, n).map(([name, n2]) => ({ name, n: n2 }));
   return {
     total: rows.length,
     cats: Object.keys(CATEGORY_LABELS).map(id => ({ id, label: CATEGORY_LABELS[id], n: cats[id] || 0 })),
     companies: Object.entries(cos).map(([id, n]) => ({ id, name: byId(id) ? byId(id).name : id, n })).sort((x, y) => y.n - x.n),
-    licenses: top(lic, 12), tasks: top(tasks, 15),
+    licenses: top(lic, 12), tasks: top(tasks, 15), verification: Object.keys(LEVELS).map(k => ({ id: k, label: LEVELS[k].label, n: ver[k] || 0 })),
+    closed: rows.filter(r => String(r.id).startsWith('cm:')).length,
   };
 });
 get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
@@ -236,10 +244,20 @@ get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
   const md = db.prepare('select * from models where id=?').get(id), out = modelOut(md);
   const sig = signalOut({ ...(db.prepare('select * from events where model_id=? order by ts desc limit 1').get(id) || { cat: 'Model Release', ts: md.released_at || md.rel, company_id: md.company_id, source: md.url }),
     mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens, model_id: id });
-  const papers = (md.arxiv ? db.prepare("select id,title,authors,published_at,date,url,verification from papers where id=? and verified=1").all('arxiv:' + md.arxiv) : []);
+  // Model -> paper links exist only where there is evidence (the model's own tags, the provider's announcement, or the paper naming the exact repository id).
+  const KIND = { hf_model_tag: 'Cited in the model\u2019s Hugging Face metadata', official_announcement: 'Listed with the provider\u2019s announcement', paper_names_model_id: 'The paper names this model\u2019s exact repository id' };
+  const papers = db.prepare('select * from model_papers where model_id=?').all(id).map(l => {
+    const p = db.prepare("select id,title,authors,published_at,date,url,verification,retrieved_at from papers where arxiv_id=? or id=?").get(l.arxiv_id, 'arxiv:' + l.arxiv_id);
+    return { arxiv_id: l.arxiv_id, in_collection: !!p, title: p ? p.title : null, authors: p ? p.authors : null, published_at: p ? (p.published_at || p.date) : null, retrieved_at: p ? p.retrieved_at : null,
+      url: p ? p.url : 'https://arxiv.org/abs/' + l.arxiv_id, verification: p ? p.verification : null, evidence: KIND[l.evidence_kind] || l.evidence_kind, evidence_url: l.evidence_url };
+  });
+  const evidence = db.prepare('select level,kind,url,label,source,verified_at from model_evidence where model_id=? order by verified_at desc').all(id);
+  const sources = db.prepare('select source,source_ref,url,first_seen,last_seen from model_sources where model_id=? order by first_seen').all(id);
+  const verification = { level: out.verification, label: LEVELS[out.verification].label, description: LEVELS[out.verification].desc, verified_at: md.verified_at || null, evidence, sources };
   const similar = db.prepare(M_SELECT + ` where m.verified=1 and m.id!=? and ((?2 is not null and m.company_id=?2) or (?3 is not null and m.pipeline=?3)) order by m.likes desc limit 6`).all(id, md.company_id || null, md.pipeline || null).map(modelOut);
   return {
-    model: out, signal: { score: sig.score, importance: sig.importance, parts: sig.parts, why: sig.why },
+    model: out, verification, signal: { score: sig.score, importance: sig.importance, parts: sig.parts, why: sig.why },
+    announcement: (evidence.find(e => e.kind === 'official_announcement') || {}).url || null,
     company: md.company_id ? (({ id: cid, name, site }) => ({ id: cid, name, site }))(byId(md.company_id)) : null,
     events: db.prepare('select * from events where model_id=? order by ts desc limit 20').all(id).map(e => signalOut({ ...e, mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens })),
     results: db.prepare('select r.*,b.name bname,b.ver bver from results r join benchmarks b on b.id=r.bench_id where model_id=? order by date desc').all(id),
@@ -268,7 +286,7 @@ get(/^\/api\/papers$/, ({ q }) => {
   return {
     total: db.prepare('select count(*) c from papers p' + w).get(...a).c,
     items: db.prepare('select p.* from papers p' + w + ' order by coalesce(p.published_at,p.date) desc limit ?3 offset ?4').all(...a, limit, offset)
-      .map(x => ({ id: x.id, title: x.title, authors: x.authors, published_at: x.published_at || x.date, url: x.url, summary: x.tldr, category: x.arch, entities: parseJson(x.entities, []), verification: x.verification || 'verified', source_type: x.source_type || 'arxiv', retrieved_at: x.retrieved_at })),
+      .map(x => ({ id: x.id, arxiv_id: x.arxiv_id || String(x.id).replace(/^arxiv:/, ''), title: x.title, authors: x.authors, published_at: x.published_at || x.date, url: x.url, summary: x.tldr, category: x.arch, categories: (x.categories || x.arch || '').split(',').filter(Boolean), entities: parseJson(x.entities, []), verification: x.verification || 'source_verified', source_type: x.source_type || 'arxiv', retrieved_at: x.retrieved_at })),
   };
 });
 get(/^\/api\/events$/, ({ q }) => signals(new URLSearchParams('window=30d&' + q.toString())).slice(0, Math.min(+q.get('limit') || 50, 100)));
@@ -285,14 +303,25 @@ get(/^\/api\/docs\/diff$/, ({ q }) => {
 get(/^\/api\/search$/, ({ q }) => {
   const t = (q.get('q') || '').trim(); if (t.length < 2) return {};
   const l = likeOf(t), lc = t.toLowerCase();
+  // Every result says what kind of thing it is and, where it has one, its verification status.
+  const tag = (type, list) => list.map(x => ({ type, ...x }));
   return {
-    models: db.prepare("select * from models m where m.verified=1 and (m.name like ?1 escape '\\' or m.creator like ?1 escape '\\' or m.pipeline like ?1 escape '\\') order by (m.company_id is not null) desc, m.likes desc limit 8").all(l).map(modelOut),
-    companies: COMPANIES.filter(c => c.name.toLowerCase().includes(lc) || c.id.includes(lc)).map(c => ({ id: c.id, name: c.name })),
-    papers: db.prepare("select id,title,authors,published_at,date,url from papers where verified=1 and (title like ?1 escape '\\' or authors like ?1 escape '\\') order by coalesce(published_at,date) desc limit 6").all(l),
-    signals: db.prepare(`select e.id,e.ts,e.cat,coalesce(e.title,e.summary) title,e.source url,e.verification from events e where ${EV_OK} and (e.summary like ?1 escape '\\' or e.title like ?1 escape '\\') order by e.ts desc limit 6`).all(l),
-    benchmarks: db.prepare("select id,name,ver from benchmarks where name like ?1 escape '\\' or cat like ?1 escape '\\' limit 6").all(l),
+    models: db.prepare("select * from models m where m.verified=1 and " + LIVE + " and (m.name like ?1 escape '\\' or m.creator like ?1 escape '\\' or m.pipeline like ?1 escape '\\') order by (m.company_id is not null) desc, m.likes desc limit 8").all(l).map(modelOut).map(m => ({ type: 'Model', ...m })),
+    companies: tag('Company', COMPANIES.filter(c => c.name.toLowerCase().includes(lc) || c.id.includes(lc)).map(c => ({ id: c.id, name: c.name }))),
+    papers: tag('Paper', db.prepare("select id,title,authors,published_at,date,url,verification,source_type,retrieved_at from papers where verified=1 and (title like ?1 escape '\\' or authors like ?1 escape '\\' or arxiv_id like ?1) order by coalesce(published_at,date) desc limit 6").all(l)),
+    signals: tag('Signal', db.prepare(`select e.id,e.ts,e.cat,coalesce(e.title,e.summary) title,e.source url,e.verification,e.retrieved_at from events e where ${EV_OK} and (e.summary like ?1 escape '\\' or e.title like ?1 escape '\\') order by e.ts desc limit 6`).all(l)),
+    benchmarks: tag('Benchmark', db.prepare("select id,name,ver from benchmarks where name like ?1 escape '\\' or cat like ?1 escape '\\' limit 6").all(l)),
   };
 });
+
+// Coverage: what we read, how often, what the statuses mean. SignalStack does not claim to list every model.
+get(/^\/api\/coverage$/, () => ({
+  levels: Object.entries(LEVELS).map(([id, v]) => ({ id, label: v.label, description: v.desc })),
+  sources: db.prepare('select id,kind,label,enabled,last_run,last_status from sources_config order by kind,label').all(),
+  models: Object.fromEntries(Object.keys(LEVELS).map(k => [k, db.prepare("select count(*) c from models m where verified=1 and verification=? and " + LIVE).get(k).c])),
+  papers: db.prepare("select count(*) c from papers where verified=1").get().c,
+  lastChecked: lastChecked(),
+}));
 
 // ---------- request handling ----------
 http.createServer((req, res) => {

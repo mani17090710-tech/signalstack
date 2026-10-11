@@ -7,13 +7,15 @@
 //  * The first run of a source is a "backfill": it fills the catalog, creates only a few signals, and never
 //    triggers alert emails, so a fresh deploy does not flood anyone.
 //  * Later runs stop paging as soon as a whole page is already known, so they stay cheap.
-//  * Every record keeps where it came from (source URL, source type, when we last retrieved it) and a
-//    verification level: verified = from the original publisher, community = open to anyone to publish.
+//  * DISCOVERY and VERIFICATION are separate. Every sighting of a model is stored in model_sources. A model's
+//    verification status is derived only from evidence rows (see lib/verify.js); being listed by Hugging Face or
+//    OpenRouter never makes a model "Verified".
 //  * Items are published immediately. Set REQUIRE_REVIEW=true to hold them for admin approval instead.
 const crypto = require('node:crypto');
 const fs = require('fs');
 const path = require('path');
 const { COMPANIES, byHandle, byOrPrefix, byGithubOwner, byId, mentions } = require('./lib/companies');
+const { recompute, levelOfTier, canonKey } = require('./lib/verify');
 const { categorize, tagInfo, parseParams, pipelineOf, typeLabel, formatCount } = require('./lib/classify');
 
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
@@ -23,7 +25,6 @@ const ts16 = s => String(s || nowIso()).replace('T', ' ').slice(0, 16);
 const unxml = s => String(s).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'").replace(/&#(\d+);/g, (m, n) => String.fromCharCode(+n)).replace(/&amp;/g, '&');
 const httpUrl = u => (/^https?:\/\/[^\s"'<>]+$/i.test(String(u || '')) ? String(u) : '');
 const isoOf = d => { const t = new Date(d); return isNaN(t) ? nowIso() : t.toISOString(); };
-const verificationOf = tier => (tier === 'primary' ? 'verified' : tier === 'secondary' ? 'reported' : 'community');
 const REVIEW = () => (process.env.REQUIRE_REVIEW === 'true' ? 0 : 1);
 
 const UA = 'signalstack-ingest/1.0 (+https://github.com/mani17090710-tech/signalstack)';
@@ -64,6 +65,7 @@ function parseArxiv(text) {
     return {
       id: 'arxiv:' + raw, title: pick(e, 'title').replace(/\s+/g, ' '), summary: pick(e, 'summary').replace(/\s+/g, ' ').slice(0, 600),
       published: pick(e, 'published'), cat: (e.match(/<arxiv:primary_category[^>]*term="([^"]+)"/) || [, ''])[1], url: 'https://arxiv.org/abs/' + raw,
+      categories: [...new Set([...e.matchAll(/<category[^>]*term="([^"]+)"/g)].map(m => m[1]))].slice(0, 10), arxivId: raw,
       authors: [...e.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)].map(m => unxml(m[1]).trim()).slice(0, 8),
     };
   }).filter(Boolean);
@@ -88,11 +90,32 @@ function addEvent(db, e) {
   return { id: r.lastInsertRowid, sev: e.sev, cat: e.cat, org_id: e.org_id };
 }
 
+
+// ---------- discovery, evidence and canonical records ----------
+function recordSource(db, id, source, url, ref) {
+  const t = nowIso();
+  db.prepare(`insert into model_sources(model_id,source,source_ref,url,first_seen,last_seen) values(?,?,?,?,?,?)
+    on conflict(model_id,source) do update set last_seen=excluded.last_seen,url=coalesce(excluded.url,model_sources.url),source_ref=coalesce(excluded.source_ref,model_sources.source_ref)`)
+    .run(id, source, ref || null, url || null, t, t);
+}
+// Evidence is what verification is built from. The url is required: evidence without a link is not evidence.
+function addEvidence(db, id, e) {
+  if (!httpUrl(e.url)) return;
+  db.prepare(`insert into model_evidence(model_id,level,kind,url,label,source,verified_at) values(?,?,?,?,?,?,?)
+    on conflict(model_id,kind,url) do update set level=excluded.level,label=excluded.label,verified_at=excluded.verified_at`)
+    .run(id, e.level, e.kind, e.url, e.label || null, e.source || null, nowIso());
+}
+// A model-to-paper link exists only where there is evidence for it; similar names are never enough.
+function linkPapers(db, modelId, arxivIds, kind, url) {
+  const ins = db.prepare('insert or ignore into model_papers(model_id,arxiv_id,evidence_kind,evidence_url,created_at) values(?,?,?,?,?)');
+  for (const a of arxivIds) if (/^\d{4}\.\d{4,5}$/.test(a)) ins.run(modelId, a, kind, url || null, nowIso());
+}
+
 const UPSERT_MODEL = `insert into models(id,name,org_id,arch,params,ctx,open,price,rel,ver,uses,verified,likes,downloads,url,creator,company_id,released_at,license,pipeline,library,cats,arxiv,param_count,params_label,gated,verification,source_type,retrieved_at)
   values($id,$name,'hf','',$params,'',1,'',$rel,'',$uses,$verified,$likes,$downloads,$url,$creator,$company,$released,$license,$pipeline,$library,$cats,$arxiv,$pc,$pl,$gated,$verification,'huggingface',$now)
   on conflict(id) do update set likes=excluded.likes,downloads=excluded.downloads,uses=excluded.uses,cats=excluded.cats,license=excluded.license,
     pipeline=excluded.pipeline,library=excluded.library,arxiv=excluded.arxiv,creator=excluded.creator,company_id=excluded.company_id,
-    verification=excluded.verification,gated=excluded.gated,retrieved_at=excluded.retrieved_at,
+    gated=excluded.gated,retrieved_at=excluded.retrieved_at,
     released_at=coalesce(models.released_at,excluded.released_at),param_count=coalesce(models.param_count,excluded.param_count),
     params_label=coalesce(models.params_label,excluded.params_label)`;
 
@@ -109,8 +132,15 @@ function saveModel(db, m) {
     id: m.id, name: m.name, params: d.pp ? d.pp.label : '', rel: (m.createdAt || nowIso()).slice(0, 10), uses: d.uses, verified: REVIEW(),
     likes: m.likes, downloads: m.downloads, url: m.url, creator: m.creator, company: d.co ? d.co.id : null, released: m.createdAt || nowIso(),
     license: d.license || null, pipeline: m.pipeline || null, library: m.library || null, cats: d.cats, arxiv: d.arxiv || null,
-    pc: d.pp ? d.pp.count : null, pl: d.pp ? d.pp.label : null, gated: m.gated, verification: d.co ? 'verified' : 'community', now: nowIso(),
+    pc: d.pp ? d.pp.count : null, pl: d.pp ? d.pp.label : null, gated: m.gated, verification: 'aggregator', now: nowIso(),
   });
+  db.prepare('update models set canon_key=? where id=? and canon_key is null').run(canonKey(m.name), m.id);
+  recordSource(db, m.id, 'huggingface', m.url, m.name);
+  // The publisher's own account is evidence that the information comes from the original source.
+  if (d.co) addEvidence(db, m.id, { level: 'source_verified', kind: 'official_account', url: m.url, label: `Published under ${d.co.name}\u2019s official Hugging Face account (${m.creator})`, source: 'huggingface' });
+  // Papers the model's own metadata cites on Hugging Face.
+  linkPapers(db, m.id, d.arxiv ? d.arxiv.split(',') : [], 'hf_model_tag', m.url);
+  d.level = recompute(db, m.id);
   return d;
 }
 const modelSentence = (m, d) => `${d.type}${d.pp ? `, ${d.pp.label} parameters` : ''}${d.license ? `, ${d.license} license` : ''}.`;
@@ -167,7 +197,7 @@ async function runHF(db, src, cfg, f, first) {
             : `Trending on Hugging Face: ${m.name} (${m.likes} likes, ${m.downloads} downloads).`;
           const ev = addEvent(db, {
             sev, ts: ts16(m.createdAt), org_id: 'hf', model_id: m.id, cat: want, summary, title: m.name, detail: modelSentence(m, d),
-            source: m.url, source_type: 'huggingface', verification: lab ? 'verified' : verificationOf(cfg.tier), company_id: lab ? lab.id : null,
+            source: m.url, source_type: 'huggingface', verification: d.level, company_id: lab ? lab.id : null,
           });
           evCount++;
           if (!first) inserted.push(ev);
@@ -186,72 +216,122 @@ async function runHF(db, src, cfg, f, first) {
 }
 
 
-// ---------- OpenRouter (closed and API-only models) ----------
-// OpenRouter's public catalogue lists models from OpenAI, Anthropic, Google, xAI and others, with context length and
-// pricing. It is a third-party list, so everything from it is badged "Reported", never "Verified".
+// ---------- Closed and API-only models ----------
+// One canonical record per model, whichever source finds it. OpenRouter and the hand-kept list both feed saveClosed();
+// the record keeps every source that listed it (model_sources) and every piece of evidence for it (model_evidence).
+const ctxLabel = n => (n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n));
+
+/**
+ * @param r {key, aliases?, company, creator, createdAt, ctx, priceIn, priceOut, modality, capabilities, pipeline, cats,
+ *           officialUrl?, official: boolean (the numbers come from the provider itself), source: {name, url, ref, orgId}, evidence: []}
+ * Where two sources disagree, the provider's own numbers win over an aggregator's.
+ */
+function saveClosed(db, r) {
+  const keys = [r.key, ...(r.aliases || [])].map(canonKey);
+  let row = null;
+  for (const k of keys) { row = db.prepare('select * from models where canon_key=?').get(k); if (row) break; }
+  const id = row ? row.id : 'cm:' + canonKey(r.key), isNew = !row;
+  const tag = r.official ? 'official' : r.source.name;
+  const price = r.priceIn != null && r.priceOut != null ? `$${r.priceIn} in / $${r.priceOut} out per 1M tokens` : '';
+  const caps = (r.capabilities || []).join(',');
+  if (isNew) {
+    db.prepare(`insert into models(id,name,org_id,arch,params,ctx,open,price,rel,ver,uses,verified,likes,downloads,url,creator,company_id,released_at,pipeline,cats,verification,source_type,retrieved_at,
+        ctx_tokens,price_in,price_out,modality,canon_key,official_url,capabilities,ctx_source,price_source)
+      values($id,$name,$org,'','',$ctx,0,$price,$rel,'','',$verified,0,0,$url,$creator,$company,$released,$pipeline,$cats,'aggregator',$stype,$now,$ctxn,$pin,$pout,$modality,$canon,$official,$caps,$csrc,$psrc)`).run({
+      id, name: r.key, org: r.source.orgId, ctx: r.ctx ? ctxLabel(r.ctx) : '', price, rel: (r.createdAt || nowIso()).slice(0, 10), verified: REVIEW(), url: r.source.url,
+      creator: r.creator, company: r.company ? r.company.id : null, released: r.createdAt || nowIso(), pipeline: r.pipeline, cats: ',' + (r.cats || []).join(',') + ',',
+      stype: r.source.name, now: nowIso(), ctxn: r.ctx, pin: r.priceIn, pout: r.priceOut, modality: r.modality || null, canon: canonKey(r.key), official: r.officialUrl || null, caps: caps || null,
+      csrc: r.ctx ? tag : null, psrc: price ? tag : null,
+    });
+  } else {
+    const better = field => !row[field] || r.official || row[field] === r.source.name; // an aggregator never overwrites the provider's own number
+    const u = [], a = [];
+    if (r.ctx && better('ctx_source')) { u.push('ctx_tokens=?', 'ctx=?', 'ctx_source=?'); a.push(r.ctx, ctxLabel(r.ctx), tag); }
+    if (price && better('price_source')) { u.push('price_in=?', 'price_out=?', 'price=?', 'price_source=?'); a.push(r.priceIn, r.priceOut, price, tag); }
+    if (r.official && r.createdAt) { u.push('released_at=?', 'rel=?'); a.push(r.createdAt, r.createdAt.slice(0, 10)); }
+    if (r.officialUrl) { u.push('official_url=?'); a.push(r.officialUrl); }
+    if (caps) { u.push('capabilities=coalesce(capabilities,?)'); a.push(caps); }
+    if (r.modality) { u.push('modality=coalesce(modality,?)'); a.push(r.modality); }
+    u.push('retrieved_at=?'); a.push(nowIso());
+    db.prepare(`update models set ${u.join(',')} where id=?`).run(...a, id);
+  }
+  recordSource(db, id, r.source.name, r.source.url, r.source.ref);
+  for (const e of r.evidence || []) addEvidence(db, id, e);
+  linkPapers(db, id, r.papers || [], 'official_announcement', r.officialUrl);
+  const level = recompute(db, id);
+  return { id, isNew, level };
+}
+
+// Release signal for a closed model. Its verification is whatever the model's evidence says, not what the source claims.
+function closedEvent(db, id, r, level) {
+  const bits = [r.type, r.ctx ? ctxLabel(r.ctx) + ' token context' : '', r.priceIn != null && r.priceOut != null ? `$${r.priceIn} / $${r.priceOut} per 1M tokens` : ''].filter(Boolean);
+  return addEvent(db, {
+    sev: r.company ? 'Major' : 'Important', ts: ts16(r.createdAt), org_id: r.source.orgId, model_id: id, cat: 'Model Release',
+    summary: `New model${r.company ? ' from ' + r.company.name : ''}: ${r.display || r.key}.`, title: r.display || r.key, detail: r.summary || (bits.join(', ') + '.'),
+    source: r.officialUrl || r.source.url, source_type: r.source.name, verification: level, company_id: r.company ? r.company.id : null,
+  });
+}
+
+// ---------- OpenRouter: a discovery catalogue, not a source of verification ----------
 function parseOpenRouter(text) {
   const j = JSON.parse(text), arr = j && j.data;
   if (!Array.isArray(arr)) throw new Error('Unexpected OpenRouter response');
   const nowSec = Date.now() / 1000;
   return arr.filter(m => m && m.id && !String(m.id).includes(':') && !(m.expiration_date && Date.parse(m.expiration_date) < Date.now())).map(m => {
-    const [prefix] = String(m.id).split('/'), a = m.architecture || {}, inp = a.input_modalities || [], out = a.output_modalities || [];
+    const [prefix] = String(m.id).split('/'), a = m.architecture || {}, inp = a.input_modalities || [], out = a.output_modalities || [], sp = m.supported_parameters || [];
     const per1m = v => (v != null && v !== '' && isFinite(+v) && +v >= 0 ? +(+v * 1e6).toFixed(4) : null);
     const tags = [];
-    if ((m.supported_parameters || []).includes('reasoning')) tags.push('reasoning');
-    if ((m.supported_parameters || []).includes('tools')) tags.push('tool-use');
+    if (sp.includes('reasoning')) tags.push('reasoning');
+    if (sp.includes('tools')) tags.push('tool-use');
+    const capabilities = [];
+    if (inp.includes('image')) capabilities.push('vision');
+    if (inp.includes('audio')) capabilities.push('audio input');
+    if (inp.includes('video')) capabilities.push('video input');
+    if (inp.includes('file')) capabilities.push('file input');
+    if (out.includes('image')) capabilities.push('image output');
+    if (sp.includes('reasoning')) capabilities.push('reasoning');
+    if (sp.includes('tools')) capabilities.push('tool use');
+    if (sp.includes('structured_outputs') || sp.includes('response_format')) capabilities.push('structured output');
     const pipeline = out.includes('image') ? 'text-to-image' : out.includes('audio') ? 'text-to-audio' : out.includes('video') ? 'text-to-video'
       : inp.includes('video') || inp.includes('audio') ? 'any-to-any' : inp.includes('image') ? 'image-text-to-text' : 'text-generation';
     const created = +m.created > 0 && +m.created < nowSec + 86400 ? new Date(+m.created * 1000).toISOString() : '';
     return {
-      id: 'or:' + m.id, orId: m.id, name: m.id, creator: prefix, createdAt: created, tags, pipeline,
+      key: String(m.id), orId: m.id, creator: prefix, createdAt: created, tags, capabilities, pipeline,
       hfId: m.hugging_face_id || '', ctx: +m.context_length > 0 ? Math.round(+m.context_length) : null,
       priceIn: per1m(m.pricing && m.pricing.prompt), priceOut: per1m(m.pricing && m.pricing.completion),
       modality: a.modality || '', url: 'https://openrouter.ai/' + m.id,
     };
   });
 }
-const ctxLabel = n => (n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n));
-const UPSERT_OR = `insert into models(id,name,org_id,arch,params,ctx,open,price,rel,ver,uses,verified,likes,downloads,url,creator,company_id,released_at,pipeline,cats,verification,source_type,retrieved_at,ctx_tokens,price_in,price_out,modality)
-  values($id,$name,'or','','',$ctx,0,$price,$rel,'',$uses,$verified,0,0,$url,$creator,$company,$released,$pipeline,$cats,'reported','openrouter',$now,$ctxn,$pin,$pout,$modality)
-  on conflict(id) do update set ctx=excluded.ctx,price=excluded.price,uses=excluded.uses,cats=excluded.cats,pipeline=excluded.pipeline,creator=excluded.creator,
-    company_id=excluded.company_id,retrieved_at=excluded.retrieved_at,ctx_tokens=excluded.ctx_tokens,price_in=excluded.price_in,price_out=excluded.price_out,
-    modality=excluded.modality,released_at=coalesce(models.released_at,excluded.released_at)`;
 
 async function runOpenRouter(db, src, cfg, f, first) {
   const r = await fetchRes(cfg.url || 'https://openrouter.ai/api/v1/models', f);
   const items = parseOpenRouter(r.text);
-  const known = db.prepare('select 1 from models where id=?'), hasHf = db.prepare('select 1 from models where id=?');
-  const attach = db.prepare('update models set ctx_tokens=coalesce(?,ctx_tokens),price_in=coalesce(?,price_in),price_out=coalesce(?,price_out),modality=coalesce(?,modality),ctx=coalesce(?,ctx),price=coalesce(?,price) where id=?');
-  const hasEv = db.prepare('select 1 from events where source=? and cat=?');
   const evCap = first ? cfg.backfillEvents || 5 : cfg.maxEvents || 25;
-  const fresh = [], inserted = [];
+  const fresh = [], inserted = [], hasEv = db.prepare('select 1 from events where source=? and cat=?');
   let created = 0, evCount = 0;
   db.exec('begin');
   try {
     for (const m of items) {
-      const price = m.priceIn != null && m.priceOut != null ? `$${m.priceIn} in / $${m.priceOut} out per 1M tokens` : null;
-      // Models that also live on Hugging Face keep their Hugging Face page; we only add context length and pricing to it.
-      if (m.hfId) { if (hasHf.get('hf:' + m.hfId)) attach.run(m.ctx, m.priceIn, m.priceOut, m.modality || null, m.ctx ? ctxLabel(m.ctx) : null, price, 'hf:' + m.hfId); continue; }
-      if (known.get('cu:' + m.orId)) continue; // the hand-kept, lab-linked entry wins
-      const co = byOrPrefix(m.creator), c = categorize({ name: m.name, pipeline: m.pipeline, tags: m.tags });
-      const isNew = !known.get(m.id);
-      db.prepare(UPSERT_OR).run({
-        id: m.id, name: m.name, ctx: m.ctx ? ctxLabel(m.ctx) : '', price: price || '', rel: (m.createdAt || nowIso()).slice(0, 10), uses: [m.pipeline, ...m.tags].join(','),
-        verified: REVIEW(), url: m.url, creator: m.creator, company: co ? co.id : null, released: m.createdAt || nowIso(), pipeline: m.pipeline,
-        cats: ',' + c.cats.join(',') + ',', now: nowIso(), ctxn: m.ctx, pin: m.priceIn, pout: m.priceOut, modality: m.modality || null,
-      });
-      if (isNew) { created++; fresh.push({ m, co, c }); }
+      const co = byOrPrefix(m.creator), c = categorize({ name: m.key, pipeline: m.pipeline, tags: m.tags });
+      const rec = {
+        key: m.key, company: co, creator: m.creator, createdAt: m.createdAt, ctx: m.ctx, priceIn: m.priceIn, priceOut: m.priceOut, modality: m.modality,
+        capabilities: m.capabilities, pipeline: m.pipeline, cats: c.cats, type: c.type, official: false, source: { name: 'openrouter', url: m.url, ref: m.orId, orgId: 'or' },
+      };
+      if (m.hfId) {
+        // Also on Hugging Face: the Hugging Face record is canonical. OpenRouter is recorded as one more place it was seen.
+        const hf = db.prepare('select id from models where canon_key=?').get(canonKey(m.hfId));
+        if (hf) saveClosed(db, { ...rec, key: m.hfId });
+        continue;
+      }
+      const res = saveClosed(db, rec);
+      if (res.isNew) { created++; fresh.push({ rec, res }); }
     }
     // The newest additions become "new model" signals (a handful on the first run, so a fresh deploy is not flooded).
-    fresh.sort((a, b) => (a.m.createdAt < b.m.createdAt ? 1 : -1));
-    for (const { m, co, c } of fresh) {
-      if (evCount >= evCap || hasEv.get(m.url, 'Model Release')) continue;
-      const bits = [c.type, m.ctx ? ctxLabel(m.ctx) + ' token context' : '', m.priceIn != null && m.priceOut != null ? `$${m.priceIn} / $${m.priceOut} per 1M tokens` : ''].filter(Boolean);
-      const ev = addEvent(db, {
-        sev: co ? 'Major' : 'Important', ts: ts16(m.createdAt), org_id: 'or', model_id: m.id, cat: 'Model Release',
-        summary: `New model${co ? ' from ' + co.name : ''}: ${m.name}.`, title: m.name, detail: bits.join(', ') + '.',
-        source: m.url, source_type: 'openrouter', verification: 'reported', company_id: co ? co.id : null,
-      });
+    fresh.sort((a, b) => (a.rec.createdAt < b.rec.createdAt ? 1 : -1));
+    for (const { rec, res } of fresh) {
+      if (evCount >= evCap || hasEv.get(rec.source.url, 'Model Release')) continue;
+      const ev = closedEvent(db, res.id, rec, res.level);
       evCount++;
       if (!first) inserted.push(ev);
     }
@@ -260,8 +340,8 @@ async function runOpenRouter(db, src, cfg, f, first) {
   return { firstText: r.text, items: items.length, created, inserted };
 }
 
-// ---------- Hand-kept list (data/curated-models.json) ----------
-// For closed models that OpenRouter does not list yet. Every entry must link to the lab's own announcement.
+// ---------- Hand-kept list (data/curated-models.json): the provider-confirmed layer ----------
+// Each entry links to the provider's own announcement, which is the evidence that earns "Verified".
 function parseCurated(text) {
   const j = JSON.parse(text), arr = j && j.models;
   if (!Array.isArray(arr)) throw new Error('curated-models.json must contain a "models" array');
@@ -273,45 +353,44 @@ function parseCurated(text) {
     else if (!m.name) problems.push(`${label}: name is required`);
     else if (!co) problems.push(`${label}: unknown company "${m.company}"`);
     else if (!/^\d{4}-\d{2}-\d{2}$/.test(String(m.released || '')) || isNaN(Date.parse(m.released))) problems.push(`${label}: released must be YYYY-MM-DD`);
-    else if (!httpUrl(m.url)) problems.push(`${label}: url must be an https link to the lab's announcement`);
-    else if (!String(m.url).startsWith('https://')) problems.push(`${label}: url must start with https://`);
+    else if (!/^https:\/\/[^\s"'<>]+$/.test(String(m.url || ''))) problems.push(`${label}: url must be an https link to the provider's announcement`);
+    else if (m.docs_url && !/^https:\/\/[^\s"'<>]+$/.test(String(m.docs_url))) problems.push(`${label}: docs_url must be an https link`);
     else items.push({
-      id: 'cu:' + m.id, name: m.id, display: String(m.name), co, createdAt: m.released + 'T00:00:00.000Z', url: String(m.url),
+      key: m.id, aliases: Array.isArray(m.aliases) ? m.aliases.map(String) : [], display: String(m.name), company: co, creator: m.id.split('/')[0],
+      createdAt: m.released + 'T00:00:00.000Z', announcementUrl: String(m.url), docsUrl: m.docs_url ? String(m.docs_url) : '',
       ctx: +m.context > 0 ? Math.round(+m.context) : null, priceIn: m.price_in != null && +m.price_in >= 0 ? +m.price_in : null,
-      priceOut: m.price_out != null && +m.price_out >= 0 ? +m.price_out : null, modality: m.modality ? String(m.modality).slice(0, 60) : '', summary: m.summary ? String(m.summary).slice(0, 240) : '',
+      priceOut: m.price_out != null && +m.price_out >= 0 ? +m.price_out : null, modality: m.modality ? String(m.modality).slice(0, 60) : '',
+      capabilities: Array.isArray(m.capabilities) ? m.capabilities.map(x => String(x).slice(0, 40)).slice(0, 12) : [],
+      summary: m.summary ? String(m.summary).slice(0, 240) : '', papers: Array.isArray(m.papers) ? m.papers.map(String) : [],
     });
   });
   return { items, problems };
 }
-const UPSERT_CU = UPSERT_OR.replace("'or',''", "'cu',''").replace("'reported','openrouter'", "'verified','curated'");
 
 async function runCurated(db, src, cfg, f, first) {
   const file = path.resolve(__dirname, cfg.file || 'data/curated-models.json');
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return { firstText: '', items: 0, created: 0, inserted: [], seen: nowIso() }; } // no file means nothing curated
   const { items, problems } = parseCurated(text);
-  const known = db.prepare('select 1 from models where id=?'), inOr = db.prepare('select 1 from models where id=?');
-  const hasEv = db.prepare('select 1 from events where source=? and cat=?');
   const inserted = [];
   let created = 0;
   db.exec('begin');
   try {
     for (const m of items) {
-      if (inOr.get('or:' + m.name)) continue; // already listed by OpenRouter; no duplicate
-      const isNew = !known.get(m.id);
-      const price = m.priceIn != null && m.priceOut != null ? `$${m.priceIn} in / $${m.priceOut} out per 1M tokens` : '';
-      db.prepare(UPSERT_CU).run({
-        id: m.id, name: m.name, ctx: m.ctx ? ctxLabel(m.ctx) : '', price, rel: m.createdAt.slice(0, 10), uses: '', verified: REVIEW(), url: m.url, creator: m.name.split('/')[0],
-        company: m.co.id, released: m.createdAt, pipeline: m.modality.includes('image') ? 'image-text-to-text' : 'text-generation', cats: ',', now: nowIso(),
-        ctxn: m.ctx, pin: m.priceIn, pout: m.priceOut, modality: m.modality || null,
-      });
-      if (isNew) {
+      const c = categorize({ name: m.key, pipeline: m.modality.includes('image') ? 'image-text-to-text' : 'text-generation', tags: [] });
+      const evidence = [{ level: 'verified', kind: 'official_announcement', url: m.announcementUrl, label: `Announced by ${m.company.name}`, source: 'curated' }];
+      if (m.docsUrl) evidence.push({ level: 'verified', kind: 'official_documentation', url: m.docsUrl, label: `${m.company.name} documentation`, source: 'curated' });
+      const rec = {
+        key: m.key, aliases: m.aliases, display: m.display, company: m.company, creator: m.creator, createdAt: m.createdAt, ctx: m.ctx, priceIn: m.priceIn, priceOut: m.priceOut,
+        modality: m.modality, capabilities: m.capabilities, pipeline: m.modality.includes('image') ? 'image-text-to-text' : 'text-generation', cats: c.cats, type: c.type,
+        summary: m.summary, officialUrl: m.docsUrl || m.announcementUrl, official: true, papers: m.papers, evidence,
+        source: { name: 'curated', url: m.announcementUrl, ref: m.key, orgId: 'cu' },
+      };
+      const res = saveClosed(db, rec);
+      if (res.isNew) {
         created++;
-        if (!hasEv.get(m.url, 'Model Release')) {
-          const ev = addEvent(db, {
-            sev: 'Major', ts: ts16(m.createdAt), org_id: 'cu', model_id: m.id, cat: 'Model Release', summary: `New model from ${m.co.name}: ${m.display}.`, title: m.display,
-            detail: m.summary || null, source: m.url, source_type: 'curated', verification: 'verified', company_id: m.co.id,
-          });
+        if (!db.prepare('select 1 from events where source=? and cat=?').get(rec.officialUrl, 'Model Release')) {
+          const ev = closedEvent(db, res.id, rec, res.level);
           if (!first) inserted.push(ev);
         }
       }
@@ -322,6 +401,18 @@ async function runCurated(db, src, cfg, f, first) {
   const warning = problems.length ? `Skipped ${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'}: ${problems.slice(0, 3).join('; ')}` : '';
   // Mark the file as seen even when it is empty, so the first entry someone adds later raises a signal.
   return { firstText: text, items: items.length, created, inserted, warning, seen: nowIso() };
+}
+
+
+function linkMentionedModels(db, papers) {
+  const cand = db.prepare("select id,canon_key from models where id like 'hf:%' and instr(?, canon_key)>0 and instr(canon_key,'/')>0 limit 20");
+  for (const p of papers) {
+    const text = `${p.title} ${p.summary}`.toLowerCase();
+    for (const m of cand.all(text)) {
+      const k = m.canon_key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp('(^|[^\\w./-])' + k + '($|[^\\w-])').test(text)) linkPapers(db, m.id, [p.arxivId], 'paper_names_model_id', p.url);
+    }
+  }
 }
 
 // ---------- arXiv ----------
@@ -335,38 +426,43 @@ async function runArxiv(db, src, cfg, f, first, opt) {
   const q = cfg.query || (cfg.category ? 'cat:' + cfg.category : 'cat:cs.CL');
   const per = Math.min(+cfg.limit || 100, 200), pages = first ? cfg.backfillPages || 3 : cfg.pages || 1;
   const known = db.prepare('select 1 from papers where id=?');
-  const ins = db.prepare(`insert or ignore into papers(id,title,org_id,date,model_ids,arch,tldr,limits,url,verified,authors,published_at,entities,verification,source_type,retrieved_at)
-    values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const ins = db.prepare(`insert or ignore into papers(id,title,org_id,date,model_ids,arch,tldr,limits,url,verified,authors,published_at,entities,verification,source_type,retrieved_at,arxiv_id,categories)
+    values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const touch = db.prepare('update papers set retrieved_at=?,categories=coalesce(categories,?),arxiv_id=coalesce(arxiv_id,?) where id=?');
   let firstText = '', total = 0, created = 0;
-  const fresh = [];
+  const fresh = [], seenAll = [];
   for (let i = 0; i < pages; i++) {
     await arxivWait(opt);
     const url = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(q)}&sortBy=submittedDate&sortOrder=descending&start=${i * per}&max_results=${per}`;
     const r = await fetchRes(url, f);
     if (i === 0) firstText = r.text;
     const items = parseArxiv(r.text);
-    total += items.length;
+    total += items.length; seenAll.push(...items);
     let n = 0;
     db.exec('begin');
     try {
       for (const p of items) {
-        if (known.get(p.id)) continue;
+        if (known.get(p.id)) { touch.run(nowIso(), p.categories.join(',') || null, p.arxivId, p.id); continue; } // seen again: refresh "last checked"
         n++; created++;
         p.entities = mentions(p.title + ' ' + p.summary);
         fresh.push(p);
         ins.run(p.id, p.title, 'arxiv', (p.published || nowIso()).slice(0, 10), '', p.cat || 'Not classified', p.summary, '', p.url, REVIEW(),
-          p.authors.join(', '), p.published ? isoOf(p.published) : nowIso(), JSON.stringify(p.entities), 'verified', 'arxiv', nowIso());
+          p.authors.join(', '), p.published ? isoOf(p.published) : nowIso(), JSON.stringify(p.entities), 'source_verified', 'arxiv', nowIso(), p.arxivId, p.categories.join(',') || null);
       }
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
     if (!items.length || items.length < per || (!first && !n)) break; // a short page means the feed has run out
   }
+  // Link new papers to models only where the paper's own text names the model's exact repository id (for example
+  // "Qwen/Qwen3-8B"). A similar name is not evidence and creates no link.
+  for (const p of seenAll) if (!p.entities) p.entities = mentions(p.title + ' ' + p.summary);
+  linkMentionedModels(db, seenAll);
   // Only papers that name a tracked lab or model family become signals; the rest stay searchable in Research.
   const inserted = [], cap = first ? cfg.backfillEvents || 5 : cfg.maxEvents || 10;
   fresh.filter(p => p.entities.length).sort((a, b) => (a.published < b.published ? 1 : -1)).slice(0, cap).forEach(p => {
     const ev = addEvent(db, {
       sev: 'Research', ts: ts16(p.published), org_id: 'arxiv', cat: 'Research', summary: 'New paper: ' + p.title, title: p.title,
-      detail: p.summary.slice(0, 240), source: p.url, source_type: 'arxiv', verification: 'verified', company_id: p.entities[0],
+      detail: p.summary.slice(0, 240), source: p.url, source_type: 'arxiv', verification: 'source_verified', company_id: p.entities[0],
       meta: { paper: p.id, mentions: p.entities },
     });
     if (!first) inserted.push(ev);
@@ -386,7 +482,7 @@ async function runGitHub(db, src, cfg, f, first) {
     const ev = addEvent(db, {
       sev: 'Major', ts: ts16(x.published), org_id: 'gh', cat: 'Open Source', summary: `${cfg.owner}/${cfg.repo} released ${x.name}.`,
       title: `${cfg.repo} ${x.name}`, detail: x.body.replace(/\s+/g, ' ').slice(0, 240), source: x.url, source_type: 'github-release',
-      verification: verificationOf(cfg.tier), company_id: co ? co.id : null, meta: { repo: `${cfg.owner}/${cfg.repo}`, tag: x.tag },
+      verification: levelOfTier(cfg.tier), company_id: co ? co.id : null, meta: { repo: `${cfg.owner}/${cfg.repo}`, tag: x.tag },
     });
     created++;
     if (!first) inserted.push(ev);
@@ -405,7 +501,7 @@ async function runFeed(db, src, cfg, f, first) {
   for (const x of first ? list.slice(-(cfg.backfillEvents || 10)) : list.slice(-20)) {
     const ev = addEvent(db, {
       sev: 'Important', ts: ts16(x.date), org_id: org.id, cat: 'Announcement', summary: `${org.name}: ${x.title}`, title: x.title,
-      source: x.link, source_type: 'blog', verification: verificationOf(cfg.tier), company_id: cfg.company || null, meta: { tier: cfg.tier || 'community' },
+      source: x.link, source_type: 'blog', verification: levelOfTier(cfg.tier), company_id: cfg.company || null, meta: { tier: cfg.tier || 'community' },
     });
     created++;
     if (!first) inserted.push(ev);
@@ -484,4 +580,4 @@ async function enrichModel(db, id, f = fetch) {
   }
 }
 
-module.exports = { parseCurated, parseOpenRouter, runAll, runSource, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };
+module.exports = { saveClosed, parseCurated, parseOpenRouter, runAll, runSource, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };

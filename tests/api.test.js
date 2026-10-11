@@ -38,7 +38,7 @@ test('now, signals and models report real ingested data', async () => {
   const now = (await api('/api/now')).body;
   assert.ok(now.top.length >= 1, 'a signal exists for the new lab model');
   assert.ok(now.top[0].score >= 0 && now.top[0].why.length > 0);
-  assert.strictEqual(now.top[0].verification, 'verified', 'a release from a lab\'s own Hugging Face account is primary-sourced');
+  assert.strictEqual(now.top[0].verification, 'source_verified', 'a release from a lab\'s own Hugging Face account is primary-sourced');
   const sig = (await api('/api/signals?window=24h')).body;
   assert.ok(sig.items.every(s => s.url && s.ts), 'every signal has a source link and a date');
   const f = (await api('/api/models/facets')).body;
