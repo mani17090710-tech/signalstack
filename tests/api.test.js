@@ -38,7 +38,7 @@ test('now, signals and models report real ingested data', async () => {
   const now = (await api('/api/now')).body;
   assert.ok(now.top.length >= 1, 'a signal exists for the new lab model');
   assert.ok(now.top[0].score >= 0 && now.top[0].why.length > 0);
-  assert.strictEqual(now.top[0].verification, 'verified', 'a release from a lab\'s own Hugging Face account is primary-sourced');
+  assert.strictEqual(now.top[0].verification, 'source_verified', 'a release from a lab\'s own Hugging Face account comes straight from the publisher');
   const sig = (await api('/api/signals?window=24h')).body;
   assert.ok(sig.items.every(s => s.url && s.ts), 'every signal has a source link and a date');
   const f = (await api('/api/models/facets')).body;
@@ -56,6 +56,21 @@ test('model detail, company and grouped search', async () => {
   assert.ok((await api('/api/companies/qwen')).body.models.length >= 1);
   const s = (await api('/api/search?q=qwen')).body;
   assert.ok(s.models.length && s.companies.length);
+  assert.ok(s.models.every(x => x.type === 'model' && x.verification_label), 'search results say what they are and how they are sourced');
+  assert.ok(s.companies.every(x => x.type === 'company'));
+});
+test('model page keeps verification (evidence) separate from discovery (sources)', async () => {
+  const d = (await api('/api/models/' + encodeURIComponent('hf:Qwen/Qwen3-Coder-27B'))).body;
+  assert.strictEqual(d.verification.status, 'source_verified', 'an official Hugging Face namespace is source verified, not verified');
+  assert.notStrictEqual(d.verification.status, 'verified', 'only the provider\'s own documentation can make a model Verified');
+  assert.ok(d.verification.evidence.some(e => e.kind === 'publisher_namespace' && /huggingface\.co\/Qwen/.test(e.url)));
+  assert.ok(d.verification.last_verified);
+  assert.ok(d.discovery.some(x => x.source === 'huggingface'), 'discovery lists where it was found');
+  assert.ok(Array.isArray(d.papers));
+  const list = (await api('/api/models?verification=verified')).body;
+  assert.strictEqual(list.total, 0, 'nothing is Verified without official evidence');
+  assert.strictEqual((await api('/api/models?verification=source_verified')).body.total, 1);
+  assert.match((await api('/api/status')).body.coverage, /does not claim to list every/);
 });
 test('auth requires accepting the terms; personal routes need login', async () => {
   const post = (p, b) => api(p, { method: 'POST', body: JSON.stringify(b) });

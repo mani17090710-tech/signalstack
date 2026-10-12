@@ -33,7 +33,7 @@ export const ago = t => {
 export const day = t => { const ms = parse(t); return isNaN(ms) ? NA : new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); };
 export const stamp = t => { const ms = parse(t); return isNaN(ms) ? NA : new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
 export const mid = id => encodeURIComponent(id);
-export const shortName = id => String(id || '').replace(/^(hf|or):/, '');
+export const shortName = id => String(id || '').replace(/^(hf|or|cu):/, '');
 export const ctxLabel = n => (!n ? null : n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M tokens' : n >= 1e3 ? Math.round(n / 1e3) + 'K tokens' : n + ' tokens');
 export const priceLabel = m => (m.price_in == null || m.price_out == null ? null : `$${m.price_in} in, $${m.price_out} out per 1M tokens`);
 export const isApi = m => m.source_type === 'openrouter' || m.source_type === 'curated';
@@ -44,13 +44,19 @@ export const CAT_LABEL = { vision: 'Vision', video: 'Video', audio: 'Audio', mul
 export const SIGNAL_LABEL = { 'Model Release': 'New model', Trending: 'Trending', Research: 'Research', 'Open Source': 'Software release', Announcement: 'Announcement' };
 
 // ---------- components ----------
-const VER = {
-  verified: ['🟢', 'Verified', 'Published by the original source: a lab’s own account, repository or blog, or arXiv itself.'],
-  reported: ['🟡', 'Reported', 'Reported by a secondary source rather than the original publisher.'],
-  community: ['🔵', 'Community', 'Comes from a community platform such as Hugging Face rankings; not confirmed by the lab.'],
+// Discovery and verification are different questions. These four statuses answer only the second one: who confirms it.
+export const VER = {
+  verified: ['🟢', 'Verified', 'Confirmed by the official provider: its own announcement or API documentation lists this.'],
+  source_verified: ['🔷', 'Source Verified', 'The information comes directly from the original publisher (for example its own Hugging Face account, release feed or arXiv), but is not matched to official provider documentation.'],
+  aggregator_listed: ['🟡', 'Aggregator Listed', 'Found in a catalogue such as OpenRouter or the Hugging Face community. The catalogue is not the provider, so this is not confirmed as an official release.'],
+  unverified: ['⚪', 'Unverified', 'Not enough reliable evidence on record.'],
 };
-export const verBadge = v => { const [i, l, t] = VER[v] || VER.community; return html`<span class="ver ver-${VER[v] ? v : 'community'}" title="${t}"><span aria-hidden="true">${i}</span> ${l}</span>`; };
-export const verLegend = () => html`<details class="legend"><summary>What do the badges mean?</summary><dl>${Object.entries(VER).map(([k, [i, l, t]]) => html`<dt>${i} ${l}</dt><dd>${t}</dd>`)}</dl><p>Verified means the item comes straight from its original publisher. It does not mean the claims in it were independently checked or peer reviewed.</p></details>`;
+export const verBadge = v => { const k = VER[v] ? v : 'unverified', [i, l, t] = VER[k]; return html`<span class="ver ver-${k}" title="${t}"><span aria-hidden="true">${i}</span> ${l}</span>`; };
+export const verLegend = () => html`<details class="legend"><summary>What do the badges mean?</summary><dl>${Object.entries(VER).map(([k, [i, l, t]]) => html`<dt>${i} ${l}</dt><dd>${t}</dd>`)}</dl><p>Finding a model somewhere (discovery) never makes it Verified. Only evidence from the publisher itself does. Verified describes where the information comes from; it does not mean its claims were independently tested.</p></details>`;
+export const FIGURE_SOURCE = { official: 'from the provider', openrouter: 'per OpenRouter listing (third party)' };
+export const figureSource = s => (s ? FIGURE_SOURCE[s] || s : '');
+export const SOURCE_NAME = { huggingface: 'Hugging Face', openrouter: 'OpenRouter catalogue', curated: 'Official list (hand-kept)' };
+export const EVIDENCE_LABEL = { model_card_tag: 'Cited on the model card', official_entry: 'Listed in the provider\u2019s own entry', abstract_link: 'The paper links to this model' };
 
 export const sourceLine = it => {
   const u = safeUrl(it.url);
