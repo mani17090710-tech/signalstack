@@ -1,7 +1,7 @@
 // Model Universe: browse every tracked model by category, lab, license and task.
-import { api, html, pageHead, modelCard, empty, skeleton, mount, $, num, applyBars } from '../lib.js';
+import { api, html, pageHead, modelCard, empty, skeleton, mount, $, num, applyBars, VER } from '../lib.js';
 
-const f = { cat: '', company: '', license: '', task: '', sort: 'new', official: false, q: '', source: '' };
+const f = { cat: '', company: '', license: '', task: '', sort: 'new', official: false, q: '', source: '', verification: '' };
 let rows = 0, total = 0, token = 0;
 const SORTS = [['new', 'Newest'], ['trending', 'Trending'], ['popular', 'Most liked'], ['downloads', 'Most downloaded'], ['params', 'Largest']];
 
@@ -10,10 +10,11 @@ export async function render() {
   const cats = fa.cats.filter(c => c.n > 0); // a category with no models is hidden rather than shown empty
   return {
     title: 'Model Universe',
-    html: html`${pageHead('Model Universe', `${num(fa.total)} models: open-weight models that matter from Hugging Face, plus closed and API models from OpenRouter\u2019s catalogue. Open a model for its sources, size, license and related research.`)}
+    html: html`${pageHead('Model Universe', `${num(fa.total)} models tracked: official and popular open-weight models from Hugging Face, plus closed and API models found in OpenRouter\u2019s catalogue. This is a curated slice, not every model that exists. Open a model to see how it was discovered and what verifies it.`)}
       <div class="toolbar"><div class="seg" role="group" aria-label="Category"><button data-cat="" class="${f.cat === '' ? 'on' : ''}">All<span class="n">${num(fa.total)}</span></button>${cats.map(c => html`<button data-cat="${c.id}" class="${f.cat === c.id ? 'on' : ''}">${c.label}<span class="n">${num(c.n)}</span></button>`)}</div></div>
       <div class="toolbar"><input id="mq" type="search" placeholder="Filter by model name" value="${f.q}" aria-label="Filter by model name">
         <select id="msrc" aria-label="Access"><option value="">Open and API models</option><option value="huggingface" ${f.source === 'huggingface' ? 'selected' : ''}>Open-weight (Hugging Face)</option><option value="api" ${f.source === 'api' ? 'selected' : ''}>API models (closed or hosted)</option></select>
+        <select id="mve" aria-label="Verification"><option value="">Any verification</option>${fa.verification.map(v => html`<option value="${v.id}" ${f.verification === v.id ? 'selected' : ''}>${VER[v.id] ? VER[v.id][1] : v.label} (${v.n})</option>`)}</select>
         <select id="mco" aria-label="Lab"><option value="">All labs</option>${fa.companies.map(c => html`<option value="${c.id}" ${f.company === c.id ? 'selected' : ''}>${c.name} (${c.n})</option>`)}</select>
         <select id="mli" aria-label="License"><option value="">Any license</option>${fa.licenses.map(l => html`<option ${f.license === l.name ? 'selected' : ''} value="${l.name}">${l.name} (${l.n})</option>`)}</select>
         <select id="mta" aria-label="Task"><option value="">Any task</option>${fa.tasks.map(l => html`<option ${f.task === l.name ? 'selected' : ''} value="${l.name}">${l.name} (${l.n})</option>`)}</select>
@@ -25,7 +26,7 @@ export async function render() {
         const my = ++token, list = $('#mlist', root);
         if (!more) { rows = 0; mount(list, skeleton(3)); }
         try {
-          const q = new URLSearchParams({ sort: f.sort, limit: 30, offset: rows, ...(f.q && { q: f.q }), ...(f.cat && { cat: f.cat }), ...(f.company && { company: f.company }), ...(f.license && { license: f.license }), ...(f.task && { task: f.task }), ...(f.official && { official: 1 }), ...(f.source && { source: f.source }) });
+          const q = new URLSearchParams({ sort: f.sort, limit: 30, offset: rows, ...(f.q && { q: f.q }), ...(f.cat && { cat: f.cat }), ...(f.company && { company: f.company }), ...(f.license && { license: f.license }), ...(f.task && { task: f.task }), ...(f.official && { official: 1 }), ...(f.source && { source: f.source }), ...(f.verification && { verification: f.verification }) });
           const d = await api('/models?' + q); if (my !== token) return;
           total = d.total; const cards = d.items.map(modelCard);
           if (more) { list.firstElementChild.insertAdjacentHTML('beforeend', cards.join('')); applyBars(list); }
@@ -36,7 +37,7 @@ export async function render() {
       };
       let t; $('#mq', root).oninput = e => { clearTimeout(t); t = setTimeout(() => { f.q = e.target.value.trim(); load(); }, 300); };
       const on = (id, k) => { $(id, root).onchange = e => { f[k] = e.target.value; load(); }; };
-      on('#msrc', 'source'); on('#mco', 'company'); on('#mli', 'license'); on('#mta', 'task'); on('#mso', 'sort');
+      on('#msrc', 'source'); on('#mve', 'verification'); on('#mco', 'company'); on('#mli', 'license'); on('#mta', 'task'); on('#mso', 'sort');
       $('#mof', root).onchange = e => { f.official = e.target.checked; load(); };
       root.addEventListener('click', e => {
         const c = e.target.closest('[data-cat]'); if (c) { f.cat = c.dataset.cat; root.querySelectorAll('[data-cat]').forEach(b => b.classList.toggle('on', b === c)); load(); }

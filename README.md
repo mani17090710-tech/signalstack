@@ -10,24 +10,40 @@ Everything comes from real public sources and links back to them. There is no de
 - **Now:** the highest-scoring signals of the last day (or week when it is quiet), new official lab
   models, Hugging Face trending, and new papers.
 - **Signals:** every detected event with time-window, type, lab and verification filters.
-- **Models:** the "Model Universe" (open-weight models that matter from Hugging Face, plus closed and API models from OpenRouter's public catalogue, badged Reported) with category, lab, license, task and sort filters, plus a detail page
-  per model (size, license, task, library, architecture, linked paper, history, related models).
+- **Models:** the "Model Universe" (official and popular open-weight models from Hugging Face, plus closed and API models found in OpenRouter's public catalogue) with category, lab, license, task and sort filters, plus a detail page
+  per model (size, license, task, library, architecture, verification evidence, where it was discovered, related research, history, related models).
 - **Research:** recent arXiv papers (cs.CL, cs.LG, cs.AI, cs.CV). A lab is shown only when the title or
   abstract names it.
 - **Companies:** the labs whose official Hugging Face and GitHub accounts are monitored.
 - **Search:** grouped into models, companies, papers, signals and benchmarks.
 - **Benchmarks / Documentation:** hidden until a source provides data.
 
-### Verification badges
+### Discovery and verification are separate
 
-| Badge | Meaning |
-|---|---|
-| Verified | Comes straight from the original publisher: a lab's own Hugging Face account, repo or blog, or arXiv. It does **not** mean the claims were independently checked. |
-| Reported | Reported by a secondary source. |
-| Community | Comes from a community platform or ranking (for example Hugging Face trending). |
+**Discovery** says a model exists somewhere: Hugging Face, the OpenRouter catalogue, or the hand-kept official list.
+Each place that lists a model is a row in `model_sources`. **Verification** says who confirms it. Each piece of
+evidence is a row in `model_evidence` with a link and a check time, and the status is computed from the evidence
+only (`lib/verify.js`). Listing a model in more places never raises its status.
 
-Every item shows its source link, publish date and when it was last checked. A fact the source does not
-provide (context length, pricing, benchmark scores) is shown as "Not available from source", never guessed.
+| Status | Meaning | Evidence that earns it |
+|---|---|---|
+| Verified | Confirmed by the official provider. | An announcement or API documentation on the provider's own domain (`data/curated-models.json`). |
+| Source Verified | Comes directly from the original publisher, not matched to official documentation. | A model in a lab's own Hugging Face namespace; a lab's own feed; arXiv for papers. |
+| Aggregator Listed | Found in a catalogue (OpenRouter, Hugging Face community uploads). Not confirmed as an official release. | A catalogue listing. |
+| Unverified | Not enough reliable evidence. | None on record. |
+
+"Verified" describes where the information comes from. It does not mean its claims were independently tested.
+Every model page shows its status, the evidence with links, when it was last verified, and every source that
+listed it. Context length and prices say where they came from ("from the provider" or "per OpenRouter listing").
+A fact no source provides is shown as "Not available from source", never guessed.
+
+### One record per model
+
+The same model often appears in several places. `lib/canon.js` keeps one canonical record per model
+(`models.canon_key`, a lower-cased `creator/name`) and attaches every listing to it. Two listings merge only when
+that key matches exactly, or a source states the link itself (OpenRouter's `hugging_face_id`, an official entry's
+`openrouter_id`). Look-alike names are never merged. Old ids keep working through `model_aliases`, and watchlists and
+events move to the surviving record. Existing databases are migrated on start.
 
 ### Signal Score
 
@@ -141,7 +157,11 @@ ephemeral filesystem, or your data resets on every redeploy.
 
 ```
 server.js          HTTP server, routing, auth, admin API, scheduler
-ingest.js          Fetch/parse/dedupe logic for Hugging Face, arXiv, GitHub and blog feeds
+ingest.js          Fetch/parse/dedupe logic for Hugging Face, OpenRouter, the official list, arXiv, GitHub and blog feeds
+lib/canon.js       Canonical model records, aliases and merging
+lib/verify.js      Evidence and verification status (separate from discovery)
+lib/policy.js      Which Hugging Face models are kept, and cleanup
+lib/links.js       Evidence-based model-paper links
 mailer.js          Email alerts via the Resend HTTPS API
 public/index.html  Frontend (auth screens + single-page app)
 Dockerfile          Container build
@@ -152,7 +172,7 @@ Dockerfile          Container build
 All `/api/*` routes except `/api/signup`, `/api/login`, `/api/logout` require a
 session cookie. `/api/admin/*` additionally requires the `admin` role.
 
-`GET /api/models`, `/api/models/:id`, `/api/benchmarks`, `/api/benchmarks/:id`,
+`GET /api/models` (filter `verification=`), `/api/models/:id` (verification, evidence, discovery, papers), `/api/papers/:arxivId`, `/api/benchmarks`, `/api/benchmarks/:id`,
 `/api/papers`, `/api/events`, `/api/orgs`, `/api/docs`, `/api/docs/diff`,
 `/api/search`, `/api/watchlist`, `/api/alerts` · `POST/DELETE /api/watchlist`,
 `/api/alerts` · `POST /api/admin/ingest/run`, `/api/admin/review`,
@@ -169,14 +189,26 @@ The tests use mock network responses; no live calls are made.
 
 ## Which models are included
 
-- **Open-weight (Hugging Face):** every model from the tracked labs' official accounts, plus models with real
-  traction (most liked, most downloaded, trending, or new models above a likes/downloads threshold). Unpopular
-  community uploads are not stored, and old ones are pruned.
-- **Closed and API models:** from OpenRouter's public catalogue (OpenAI, Anthropic, Google, xAI, Mistral, DeepSeek,
-  Amazon, Cohere and more), with context length and pricing. It is a third-party list, so these are badged
-  Reported, not Verified, and prices are OpenRouter's. Models that also exist on Hugging Face keep their Hugging
-  Face page and only gain context length and pricing.
-- **Hand-kept list:** `data/curated-models.json` is for closed models OpenRouter does not list yet. Each entry must
-  link to the lab's own announcement and is badged Verified. See `data/README.md` for the format. Invalid entries
-  are skipped and reported in Admin > Monitored sources.
-- The thresholds are in each source's `config` row in `sources_config` (`minLikes`, `minDownloads`).
+SignalStack does **not** claim to list every AI model or paper. It covers:
+
+- **Open-weight (Hugging Face), by one policy** (`lib/policy.js`, applied to every Hugging Face source): official lab
+  releases, trending models, and community models with at least `HF_MIN_LIKES` likes (default 20) or
+  `HF_MIN_DOWNLOADS` downloads (default 3000). New releases are discovered automatically (new-model and per-lab
+  feeds). Cleanup removes community models that are below the bar and have not been seen for `HF_STALE_DAYS` (45)
+  days, or are below `HF_PRUNE_LIKES`/`HF_PRUNE_DOWNLOADS` (10 / 1000) and unseen for `HF_GRACE_DAYS` (14). Official,
+  watched, referenced (signals, benchmarks, papers) and officially verified models are never removed.
+- **Closed and API models:** discovered through OpenRouter's public catalogue, with context length and pricing as
+  OpenRouter lists them. This is a catalogue, not the provider, so they are Aggregator Listed. A model that leaves
+  the catalogue is marked "no longer listed", not deleted.
+- **Official list:** `data/curated-models.json` holds closed models confirmed from the provider's own announcement
+  or documentation. Links must be on the provider's own domain (`lib/companies.js`), otherwise the entry is rejected.
+  This is the only way a closed model becomes Verified. See `data/README.md`.
+- **Papers:** arXiv categories cs.CL, cs.LG, cs.AI, cs.CV (plus stat.ML, cs.RO, cs.IR). Title, all authors, full
+  abstract, dates, arXiv id, all categories, source and last-checked time are stored as arXiv publishes them.
+  Papers cited by models are fetched by id. A paper's details come from arXiv (primary record); a paper only
+  referenced by another source is labelled secondary.
+- **Model-paper links** exist only with evidence: the model card cites the arXiv id (claimed by the publisher when it is
+  a lab's own account), the provider's own entry lists it, or the paper's abstract links to the model's Hugging Face
+  page. A similar name never creates a link.
+- **Not built yet:** benchmark scores (the tables exist but stay hidden until a reliable, attributable source is
+  connected) and AI explanations. The site works fully without any LLM API key.
