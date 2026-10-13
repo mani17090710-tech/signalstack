@@ -146,12 +146,13 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
 .dlg-links { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 14px; }
 
 /* ---- intro ---- */
-#intro { position: fixed; inset: 0; z-index: 100; background: radial-gradient(ellipse at 50% 40%, #0a1630 0%, #050a16 70%); display: grid; grid-template-rows: 1fr auto; overflow: hidden; }
+#intro { position: fixed; inset: 0; z-index: 100; background: radial-gradient(ellipse at 50% 40%, #0a1630 0%, #050a16 70%); display: grid; grid-template-rows: minmax(190px, 1fr) auto; overflow: hidden; }
+.intro-stage { position: relative; min-height: 0; }
 #universe { position: absolute; inset: 0; width: 100%; height: 100%; }
-.intro-copy { position: relative; align-self: end; padding: 0 24px 40px; max-width: 760px; margin: 0 auto; width: 100%; text-align: center; display: grid; gap: 16px; justify-items: center; pointer-events: none; }
+.intro-copy { position: relative; padding: 8px 24px 32px; max-width: 760px; margin: 0 auto; width: 100%; text-align: center; display: grid; gap: 16px; justify-items: center; pointer-events: none; }
 .intro-copy > * { pointer-events: auto; }
-.intro-copy h1 { font-size: clamp(30px, 5.5vw, 52px); text-shadow: 0 2px 30px #050a16; }
-.intro-copy p { color: var(--mut); font-size: 17px; max-width: 52ch; text-shadow: 0 1px 14px #050a16; }
+.intro-copy h1 { font-size: clamp(26px, 4.4vw, 44px); line-height: 1.12; text-wrap: balance; text-shadow: 0 2px 30px #050a16; }
+.intro-copy p { color: var(--mut); font-size: 16px; max-width: 52ch; text-shadow: 0 1px 14px #050a16; }
 .intro-cta { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
 .intro-cta button { min-height: 48px; padding: 10px 22px; font-size: 16px; }
 .intro-stat { color: var(--dim); font-size: 14px; display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
