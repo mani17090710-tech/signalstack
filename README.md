@@ -192,7 +192,7 @@ The tests use mock network responses; no live calls are made.
 SignalStack does **not** claim to list every AI model or paper. It covers:
 
 - **Open-weight (Hugging Face), by one policy** (`lib/policy.js`, applied to every Hugging Face source): official lab
-  releases, trending models, and community models with at least `HF_MIN_LIKES` likes (default 20) or
+  releases, trending models (with at least `HF_TRENDING_MIN_LIKES` likes, default 10, or `HF_TRENDING_MIN_DOWNLOADS` downloads, default 1000), and community models with at least `HF_MIN_LIKES` likes (default 20) or
   `HF_MIN_DOWNLOADS` downloads (default 3000). New releases are discovered automatically (new-model and per-lab
   feeds). Cleanup removes community models that are below the bar and have not been seen for `HF_STALE_DAYS` (45)
   days, or are below `HF_PRUNE_LIKES`/`HF_PRUNE_DOWNLOADS` (10 / 1000) and unseen for `HF_GRACE_DAYS` (14). Official,

@@ -1,5 +1,5 @@
 // Model detail: facts with their source, a Signal Score with its reasoning, related research and history.
-import { api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi, figureSource, SOURCE_NAME, EVIDENCE_LABEL } from '../lib.js';
+import { api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi, figureSource, SOURCE_NAME, EVIDENCE_LABEL, dateLabel } from '../lib.js';
 
 const fact = (k, v, unit = '', src = '') => html`<dt>${k}</dt><dd>${v == null || v === '' ? html`<span class="na">${NA}</span>` : v}${v == null || v === '' ? '' : unit}${v == null || v === '' || !src ? '' : html`<span class="fig">${src}</span>`}</dd>`;
 
@@ -15,7 +15,7 @@ export async function render(id) {
         <section class="panel"><h2>Signal Score</h2>
           <div class="sig-head">${scoreRing(s.score, true)}<div><b>${s.importance}</b><p class="detail">SignalStack’s estimate of how much attention this deserves right now.</p></div></div>${scoreBreakdown(s, true)}</section>
         <section class="panel"><h2>Facts</h2><dl class="kv">
-          ${fact('Publisher', m.company || m.creator)}${fact('Released', m.released_at ? day(m.released_at) : null)}${isApi(m) ? '' : fact('Last updated', m.updated_at ? day(m.updated_at) : null)}
+          ${fact('Publisher', m.company || m.creator)}${fact(dateLabel(m), m.released_at ? day(m.released_at) : null)}${isApi(m) ? '' : fact('Last updated', m.updated_at ? day(m.updated_at) : null)}
           ${isApi(m) ? html`<dt>Parameters</dt><dd><span class="na">Not publicly available</span></dd>` : fact('Parameters', m.params)}${fact('License', m.license)}${fact('Task', m.pipeline)}${isApi(m) ? '' : html`${fact('Library', m.library)}${fact('Architecture', m.arch)}`}
           ${fact('Model ID', m.provider_model_id || m.model_ref)}${fact('Context length', ctxLabel(m.context_length), '', figureSource(m.context_source))}${fact('Pricing', priceLabel(m), '', figureSource(m.price_source))}${fact('Capabilities', m.capabilities.length ? m.capabilities.join(', ') : null)}${isApi(m) ? '' : html`${fact('Downloads', num(m.downloads))}${fact('Likes', num(m.likes))}`}</dl>
           <p class="src"><a href="${safeUrl(m.url)}" target="_blank" rel="noopener noreferrer">${host(m.url) || 'Source'}</a><span>Checked ${ago(m.retrieved_at)}</span></p>
