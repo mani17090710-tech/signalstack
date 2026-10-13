@@ -36,6 +36,8 @@ export const mid = id => encodeURIComponent(id);
 export const shortName = id => String(id || '').replace(/^(hf|or|cu):/, '');
 export const ctxLabel = n => (!n ? null : n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M tokens' : n >= 1e3 ? Math.round(n / 1e3) + 'K tokens' : n + ' tokens');
 export const priceLabel = m => (m.price_in == null || m.price_out == null ? null : `$${m.price_in} in, $${m.price_out} out per 1M tokens`);
+export const DATE_LABEL = { released: 'Released', listed: 'Added to OpenRouter', published: 'Published on Hugging Face' };
+export const dateLabel = m => DATE_LABEL[m.date_kind] || 'Released';
 export const isApi = m => m.source_type === 'openrouter' || m.source_type === 'curated';
 export const safeUrl = u => (/^https?:\/\//i.test(u || '') ? u : '');
 export const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return ''; } };
@@ -82,8 +84,8 @@ export const modelCard = m => html`<article class="mcard">
   <div class="mc-top"><a class="mc-name" href="#model/${mid(m.id)}">${shortName(m.id).split('/').pop()}</a>${m.trend_rank ? html`<span class="tag">Trending #${m.trend_rank}</span>` : ''}</div>
   <p class="mc-by">${m.company ? html`<a href="#company/${m.company_id}">${m.company}</a>` : m.creator || 'Unknown publisher'}</p>
   <div class="tags">${m.cats.slice(0, 3).map(c => html`<span class="tag">${CAT_LABEL[c] || c}</span>`)}${m.pipeline && !m.cats.length ? html`<span class="tag">${m.pipeline}</span>` : ''}${verBadge(m.verification)}</div>
-  <dl class="facts">${isApi(m) ? html`<div><dt>Context</dt><dd>${ctxLabel(m.context_length) || NA}</dd></div><div><dt>Input price</dt><dd>${m.price_in == null ? NA : '$' + m.price_in + ' / 1M'}</dd></div><div><dt>Output price</dt><dd>${m.price_out == null ? NA : '$' + m.price_out + ' / 1M'}</dd></div><div><dt>Released</dt><dd>${day(m.released_at)}</dd></div>`
-    : html`<div><dt>Size</dt><dd>${m.params || NA}</dd></div><div><dt>Likes</dt><dd>${num(m.likes)}</dd></div><div><dt>Downloads</dt><dd>${num(m.downloads)}</dd></div><div><dt>Released</dt><dd>${day(m.released_at)}</dd></div>`}</dl>
+  <dl class="facts">${isApi(m) ? html`<div><dt>Context</dt><dd>${ctxLabel(m.context_length) || NA}</dd></div><div><dt>Input price</dt><dd>${m.price_in == null ? NA : '$' + m.price_in + ' / 1M'}</dd></div><div><dt>Output price</dt><dd>${m.price_out == null ? NA : '$' + m.price_out + ' / 1M'}</dd></div><div><dt>${dateLabel(m)}</dt><dd>${day(m.released_at)}</dd></div>`
+    : html`<div><dt>Size</dt><dd>${m.params || NA}</dd></div><div><dt>Likes</dt><dd>${num(m.likes)}</dd></div><div><dt>Downloads</dt><dd>${num(m.downloads)}</dd></div><div><dt>${dateLabel(m)}</dt><dd>${day(m.released_at)}</dd></div>`}</dl>
   <button class="mini" data-watch="${m.id}">${state.watch.includes(m.id) ? 'Watching' : 'Watch'}</button></article>`;
 
 export const skeleton = (n = 4) => html`<div class="skel" aria-busy="true" aria-label="Loading">${Array.from({ length: n }, () => html`<div class="sk"><i></i><i></i><i></i></div>`)}</div>`;

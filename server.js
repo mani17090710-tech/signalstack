@@ -99,7 +99,9 @@ function modelOut(m) {
   const co = m.company_id ? byId(m.company_id) : null, status = STATUSES.includes(m.verification) ? m.verification : 'unverified';
   return {
     id: m.id, name: m.name, creator: m.creator || '', company_id: m.company_id || null, company: co ? co.name : null,
-    released_at: m.released_at || m.rel || null, updated_at: m.updated_at || null, retrieved_at: m.retrieved_at || null,
+    released_at: m.released_at || m.rel || null,
+    // What the date means: an official release date only comes from the provider; catalogue and Hugging Face dates are when the entry appeared there.
+    date_kind: m.verification === 'verified' ? 'released' : m.source_type === 'openrouter' ? 'listed' : 'published', updated_at: m.updated_at || null, retrieved_at: m.retrieved_at || null,
     license: m.license || null, pipeline: m.pipeline || null, library: m.library || null, arch: m.arch || null,
     cats: (m.cats || '').split(',').filter(Boolean), params: m.params_label || null, param_count: m.param_count || null,
     gated: !!m.gated, likes: m.likes || 0, downloads: m.downloads || 0, url: m.url || null, arxiv: m.arxiv || null,

@@ -68,7 +68,8 @@ test('migration gives old rows a canonical key and evidence, merges duplicates, 
 
 test('policy keeps official, trending and popular models; cleanup removes only stale low-traction ones with no references', () => {
   assert.strictEqual(keepReason({ likes: 0, downloads: 0 }, { official: true }), 'official');
-  assert.strictEqual(keepReason({ likes: 0, downloads: 0 }, { trending: true }), 'trending');
+  assert.strictEqual(keepReason({ likes: 12, downloads: 0 }, { trending: true }), 'trending');
+  assert.strictEqual(keepReason({ likes: 3, downloads: 0 }, { trending: true }), null, 'a trending entry with almost no likes or downloads is skipped');
   assert.strictEqual(keepReason({ likes: 25, downloads: 0 }), 'popular');
   assert.strictEqual(keepReason({ likes: 3, downloads: 100 }), null);
   const db = openDb(':memory:');
