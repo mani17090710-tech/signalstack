@@ -181,3 +181,53 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
 .warn-t { color: var(--warn); }
 
 .panel > h3 { margin: 20px 0 6px; font-size: 15px; }
+
+/* ---- auth dialog: Log in / Create account trade places under a diagonal blade ---- */
+#authdlg { padding: 0; border: 0; background: transparent; overflow: visible; width: min(400px, calc(100vw - 32px)); max-width: none; }
+#authdlg::backdrop { background: radial-gradient(60vmax 60vmax at 0% 0%, rgba(31, 166, 201, .2), transparent 70%), radial-gradient(60vmax 60vmax at 100% 100%, rgba(29, 63, 176, .35), transparent 70%), rgba(2, 5, 12, .88); backdrop-filter: none; }
+#authdlg .auth { position: relative; width: 100%; height: min(610px, calc(100dvh - 24px)); background: var(--panel); border: 1px solid var(--line2); border-radius: 22px; overflow: hidden; contain: layout paint;
+  box-shadow: 0 30px 80px -24px rgba(0, 0, 0, .7), 0 0 0 1px rgba(53, 212, 244, .05) inset; }
+#authdlg .pane { position: absolute; inset: 0; padding: 36px 28px 20px; display: flex; flex-direction: column; gap: 12px; opacity: 0; pointer-events: none; overflow-y: auto; }
+#authdlg .pane.is-on { opacity: 1; pointer-events: auto; }
+#authdlg .pane.is-on > * { animation: auth-rise .7s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--d, 0ms) + var(--i) * 60ms); }
+@keyframes auth-rise { from { opacity: 0; transform: translateY(16px); } }
+#authdlg .pane > * { flex: none; }
+#authdlg .brand { display: flex; align-items: center; gap: 8px; font-family: var(--display); font-weight: 600; font-size: 14px; color: var(--mut); margin-bottom: 4px; }
+#authdlg .brand i { width: 9px; height: 9px; border-radius: 50%; background: var(--cy); box-shadow: 0 0 10px var(--cy); }
+#authdlg .title { font-size: 36px; line-height: 1.08; margin: 0 0 10px; font-weight: 600; letter-spacing: -.03em; text-wrap: balance; }
+#authdlg .title em { font-style: normal; background: linear-gradient(120deg, var(--cy), var(--blu)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#authdlg .sub { margin: 0; color: var(--mut); font-size: 15px; }
+#authdlg .note[hidden] { display: none; }
+#authdlg .field { position: relative; }
+#authdlg .field input { width: 100%; min-height: 54px; padding: 22px 14px 8px; border-radius: 11px; border: 1px solid var(--line2); background: var(--panel2); transition: border-color .2s, box-shadow .2s; }
+#authdlg .field label { position: absolute; left: 15px; top: 16px; color: var(--dim); pointer-events: none; transition: all .18s ease; }
+#authdlg .field input:focus { outline: none; border-color: var(--cy); box-shadow: 0 0 0 4px rgba(53, 212, 244, .16); }
+#authdlg .field input:focus + label, #authdlg .field input:not(:placeholder-shown) + label { top: 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--cy); }
+#authdlg .chk { font-size: 13px; line-height: 1.4; }
+#authdlg .chk input { appearance: none; padding: 0; margin: 1px 0 0; width: 18px; height: 18px; min-height: 0; border-radius: 5px; border: 1px solid var(--line2); background: var(--panel2); display: grid; place-content: center; cursor: pointer; }
+#authdlg .chk input:checked { background: var(--cy); border-color: var(--cy); }
+#authdlg .chk input:checked::after { content: ''; width: 9px; height: 5px; border: 2px solid #031018; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+#authdlg .fp { align-self: flex-end; font-size: 13px; }
+#authdlg .err { min-height: 0; } #authdlg .err:empty { display: none; }
+#authdlg .go { min-height: 50px; padding: 14px; border: 0; border-radius: 11px; font-weight: 700; color: #031018; cursor: pointer; background: linear-gradient(120deg, var(--cy), var(--blu), var(--cy)); background-size: 200% 100%;
+  transition: background-position .5s, transform .15s; box-shadow: 0 10px 26px -12px var(--cy); }
+#authdlg .go:hover { background-position: 100% 0; } #authdlg .go:active { transform: scale(.98); }
+#authdlg .links { margin-top: auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+#authdlg .swap, #authdlg .keep { background: none; border: 0; min-height: 0; padding: 8px 0; font-weight: 500; text-align: left; cursor: pointer; }
+#authdlg .swap { color: var(--mut); } #authdlg .swap b { color: var(--ink); background: linear-gradient(currentColor, currentColor) 0 100% / 0 1.5px no-repeat; transition: background-size .3s; } #authdlg .swap:hover b { background-size: 100% 1.5px; }
+#authdlg .keep { color: var(--dim); text-decoration: underline; }
+#authdlg .fine { text-align: center; margin-top: -4px; }
+#authdlg .auth__band { position: absolute; top: 0; left: 0; height: 100%; overflow: hidden; pointer-events: none; will-change: transform; transform: skewX(-12deg) translateX(-9999px);
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .07) 0 2px, transparent 2px 16px), linear-gradient(115deg, var(--cy2) 0%, #2b6fe0 58%, #1d3fb0 100%); }
+#authdlg .band__inner { position: absolute; inset: 0; transform: translateX(9999px) skewX(12deg); will-change: transform; }
+#authdlg .band__page { position: absolute; top: 0; left: 0; height: 100%; }
+#authdlg .band__slide { position: absolute; top: 36px; left: 28px; right: 28px; opacity: 0; color: #fff; } #authdlg .band__slide.is-on { opacity: 1; }
+#authdlg .band__slide .brand { color: rgba(255, 255, 255, .8); } #authdlg .band__slide .brand i { background: #fff; box-shadow: 0 0 10px #fff; }
+#authdlg .band__slide .title { text-shadow: 0 6px 30px rgba(0, 0, 0, .3); }
+#authdlg .band__slide .title em { background: none; -webkit-background-clip: initial; background-clip: initial; color: #fff; opacity: .85; }
+#authdlg .band__slide .sub { color: rgba(255, 255, 255, .85); }
+#authdlg .band__edge { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; box-shadow: 0 0 22px 5px rgba(255, 255, 255, .7); }
+#authdlg .band__edge--lead { right: 0; } #authdlg .band__edge--trail { left: 0; opacity: .6; }
+#authdlg .echo { position: absolute; top: 0; left: 0; height: 100%; width: 9px; pointer-events: none; background: var(--cy); box-shadow: 0 0 26px 6px var(--cy); opacity: 0; will-change: transform; transform: skewX(-12deg) translateX(-9999px); }
+#authdlg .auth.is-busy .echo { opacity: .9; }
+@media (prefers-reduced-motion: reduce) { #authdlg .pane.is-on > * { animation: none; } }
