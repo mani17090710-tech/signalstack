@@ -9,7 +9,7 @@ const markSeen = () => { try { localStorage.setItem(SEEN, '1'); } catch (e) { /*
 export async function showIntro(go) {
   const el = document.createElement('div'); el.id = 'intro'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Welcome to Signalstack');
   document.body.append(el);
-  mount(el, html`<canvas id="universe" aria-hidden="true"></canvas><div class="intro-tip" id="itip"></div>
+  mount(el, html`<div class="intro-stage"><canvas id="universe" aria-hidden="true"></canvas><div class="intro-tip" id="itip"></div></div>
     <button class="intro-skip" id="iskip">Skip intro</button>
     <div class="intro-copy"><h1>A live, source-checked view of AI models, papers and releases</h1>
     <p>Signalstack reads Hugging Face, arXiv, GitHub, lab blogs and a public model catalogue, and shows how each item is sourced. It does not claim to list every model or paper.</p>
@@ -39,7 +39,8 @@ function drawUniverse(cv, tip, companies) {
   const fit = () => { const dpr = Math.min(2, devicePixelRatio || 1); W = cv.clientWidth; H = cv.clientHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); };
   const draw = now => {
     const t = (now - t0) / 1000; ctx.clearRect(0, 0, W, H);
-    const cx = W / 2, narrow = W < 700, cy = H * (narrow ? 0.22 : 0.3), R = narrow ? Math.min(W * 0.42, H * 0.19) : Math.min(W * 0.44, H * 0.25);
+    // The map has its own area above the text, so the two never overlap: centre it, and size it to fit with room for the labels.
+    const cx = W / 2, cy = H / 2, R = Math.max(40, Math.min(W * 0.44, (H / 2 - 46) / 0.62));
     for (const k of [0.45, 0.75, 1]) { ctx.beginPath(); ctx.ellipse(cx, cy, R * k, R * k * 0.62, 0, 0, 6.283); ctx.strokeStyle = 'rgba(53,212,244,' + (0.07 + 0.03 * k) + ')'; ctx.lineWidth = 1; ctx.stroke(); }
     nodes.forEach((n, i) => {
       const k = [0.45, 0.75, 1][i % 3], a = n.ang + t * n.sp * (reduce ? 0 : 1);
