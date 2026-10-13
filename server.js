@@ -363,6 +363,8 @@ http.createServer((req, res) => {
       const j = body ? JSON.parse(body) : {}, sid = (req.headers.cookie || '').match(/sid=([a-f0-9]+)/)?.[1];
       const s = sid && db.prepare('select user_id from sessions where token=? and expires>?').get(sid, Date.now());
       const uid = s?.user_id, reply = (c, o, h) => send(req, res, c, o, { 'Cache-Control': 'no-store', ...h });
+      // ADMIN_EMAILS (comma-separated) lists accounts that are always admins, so a fresh database does not depend on who signs up first.
+      const adminEmails = () => String(process.env.ADMIN_EMAILS || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
       const need = () => { if (!uid) { reply(401, { error: 'Please log in to continue.' }); return false; } return true; };
       const ck = t => `sid=${t}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${t ? 604800 : 0}${process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true' ? '; Secure' : ''}`;
       const authLimited = () => { if (limited('auth:' + ip, 10)) { reply(429, { error: 'Too many attempts. Wait a minute and try again.' }); return true; } return false; };
@@ -375,7 +377,7 @@ http.createServer((req, res) => {
         if ((j.password || '').length < 8) return reply(400, { error: 'Password must be at least 8 characters.' });
         if (j.accept !== true) return reply(400, { error: 'You must accept the Terms & Conditions and Privacy Policy to create an account.' });
         if (db.prepare('select 1 from users where email=?').get(email)) return reply(409, { error: 'An account with this email already exists. Try logging in.' });
-        const role = db.prepare('select count(*) c from users').get().c === 0 ? 'admin' : 'user';
+        const role = db.prepare('select count(*) c from users').get().c === 0 || adminEmails().includes(email) ? 'admin' : 'user';
         const r = db.prepare('insert into users(email,name,pw,role,accepted_at,accepted_version) values(?,?,?,?,?,?)').run(email, String(j.name || '').slice(0, 60), hashPw(j.password), role, new Date().toISOString(), LEGAL_VERSION);
         return reply(201, { ok: true }, { 'Set-Cookie': ck(newSession(r.lastInsertRowid)) });
       }
@@ -383,6 +385,7 @@ http.createServer((req, res) => {
         if (authLimited()) return;
         const us = db.prepare('select * from users where email=?').get(String(j.email || '').trim().toLowerCase());
         if (!us || !checkPw(String(j.password || ''), us.pw)) return reply(401, { error: 'Email or password is incorrect.' });
+        if (us.role !== 'admin' && adminEmails().includes(us.email)) db.prepare("update users set role='admin' where id=?").run(us.id);
         return reply(200, { ok: true }, { 'Set-Cookie': ck(newSession(us.id)) });
       }
       if (p === '/api/logout') { if (sid) db.prepare('delete from sessions where token=?').run(sid); return reply(200, { ok: true }, { 'Set-Cookie': ck('') }); }
