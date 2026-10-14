@@ -1,0 +1,24 @@
+/* Motion: staggered reveals, count-up numbers and tactile hover states.
+   Everything animates transform or opacity only, and everything is switched off for people who prefer reduced motion. */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* staggered reveal: JS adds .m-in and --md (delay) to each card/row when a page loads */
+  .m-in { animation: m-rise .5s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: var(--md, 0ms); }
+  @keyframes m-rise { from { opacity: 0; transform: translateY(14px); } }
+  .m-ring { animation: m-pop .7s cubic-bezier(.2, 1.4, .4, 1) backwards; animation-delay: var(--md, 0ms); }
+  @keyframes m-pop { from { transform: scale(.6); opacity: 0; box-shadow: none; } 60% { box-shadow: 0 0 30px rgba(53, 212, 244, .5); } }
+
+  /* buttons and nav */
+  button, .nav a, .bottom a { transition: transform .15s, background-color .2s, border-color .2s, box-shadow .25s, color .2s; }
+  button:active:not(:disabled) { transform: scale(.97); }
+  button.pri { background-image: linear-gradient(120deg, var(--cy), #5b9dff, var(--cy)); background-size: 200% 100%; background-position: 0 0; transition: background-position .5s, transform .15s, box-shadow .25s; }
+  button.pri:hover:not(:disabled) { background-color: var(--cy); background-position: 100% 0; box-shadow: 0 8px 24px -10px var(--cy); }
+  .nav a { position: relative; }
+  .nav a::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 3px; height: 2px; border-radius: 2px; background: var(--cy); transform: scaleX(0); transform-origin: left; transition: transform .3s cubic-bezier(.2, .8, .2, 1); }
+  .nav a:hover::after, .nav a.on::after { transform: scaleX(1); }
+  .bottom a svg { transition: transform .25s cubic-bezier(.2, 1.4, .4, 1); } .bottom a.on svg { transform: translateY(-2px) scale(1.12); }
+}
+@media (prefers-reduced-motion: no-preference) and (hover: hover) {
+  .mcard, .sig, a.panel { transition: transform .2s cubic-bezier(.2, .8, .2, 1), border-color .2s, box-shadow .25s; }
+  .mcard:hover, .sig:hover, a.panel:hover { transform: translateY(-3px); border-color: rgba(53, 212, 244, .45); box-shadow: 0 16px 36px -20px rgba(53, 212, 244, .45); }
+}

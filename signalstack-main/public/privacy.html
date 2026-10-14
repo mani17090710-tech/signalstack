@@ -1,0 +1,89 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy Policy · Signalstack</title>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f7f3;--ink:#1d2622;--mut:#66736c;--line:#e2e6df;--acc:#1f7a4d;--side:#12372a}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 Figtree,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--side);padding:16px 24px}header a{color:#fff;font-weight:700;font-size:18px;text-decoration:none}
+main{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:30px;margin:0 0 4px}h2{font-size:19px;margin:32px 0 6px}
+.meta{color:var(--mut);font-size:14px;margin:0 0 20px}
+a{color:var(--acc);font-weight:500}ul{padding-left:22px}li{margin:4px 0}
+table{border-collapse:collapse;width:100%;font-size:15px;margin:10px 0}th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-size:13px}
+footer{color:var(--mut);font-size:14px;margin-top:40px;border-top:1px solid var(--line);padding-top:16px}
+</style></head><body>
+<header><a href="/">Signalstack</a></header>
+<main>
+<h1>Privacy Policy</h1>
+<p class="meta">Last updated: {{UPDATED}} · Operated by {{OPERATOR_NAME}}</p>
+
+<p>This policy explains what personal information Signalstack ("we", "us") collects when you create an account and use the service, why we collect it, and the choices you have. We have tried to keep it plain and to describe only what the service actually does.</p>
+
+<h2>1. What we collect</h2>
+<table>
+<tr><th>Information</th><th>Why we need it</th></tr>
+<tr><td><b>Email address</b> (required)</td><td>To create your account, log you in, send password-reset codes, and send alert emails you ask for.</td></tr>
+<tr><td><b>Name</b> (optional)</td><td>To show a name in the app. You can leave it blank.</td></tr>
+<tr><td><b>Password</b></td><td>Used to log you in. We never store it in readable form; we store only a salted, one-way scrypt hash.</td></tr>
+<tr><td><b>Your settings and activity in the app</b></td><td>Your watchlist and alert rules (organization, category, minimum severity, delivery channel), so the service can show and send what you asked for.</td></tr>
+<tr><td><b>Account and acceptance records</b></td><td>The date you created your account, your role (admin or user), and the time and version of the Terms and this Policy you accepted.</td></tr>
+<tr><td><b>Session cookie</b></td><td>A cookie named <code>sid</code> keeps you logged in for up to 7 days.</td></tr>
+<tr><td><b>Notification log</b></td><td>Whether an alert email to you was sent or failed, with any error message, so we can fix delivery problems.</td></tr>
+</table>
+<p>We do <b>not</b> use advertising trackers or third-party analytics, and we do not sell your personal information.</p>
+
+<h2>2. Technical data</h2>
+<p>Your IP address is used in server memory to limit repeated login, signup and password-reset attempts. It is not written to our database. Our hosting provider or server logs may record standard request information (such as IP address, time and requested page) for security and operations; those logs are described in section 5.</p>
+
+<h2>3. Cookies and browser features</h2>
+<ul>
+<li><b>Session cookie (<code>sid</code>):</b> strictly necessary to keep you logged in. It is HttpOnly and expires after 7 days or when you log out.</li>
+<li><b>Browser notifications:</b> if you allow them, your open browser tab checks for new alert matches about once a minute and shows a notification locally. We do not send background push messages.</li>
+<li>We do not use advertising or analytics cookies.</li>
+</ul>
+
+<h2>4. How we use information</h2>
+<ul>
+<li>To provide the service: authentication, your watchlist, and alerts.</li>
+<li>To send emails you request: password-reset codes and alert emails you turned on.</li>
+<li>To keep the service secure and prevent abuse.</li>
+<li>To meet legal obligations and to keep a record that you accepted our Terms and this Policy.</li>
+</ul>
+<p>We do not use your personal information for automated decision-making or profiling.</p>
+
+<h2>5. Who we share it with</h2>
+<p>We share information only with service providers that help us run Signalstack, and only as needed:</p>
+<ul>
+<li><b>Email delivery (Resend):</b> receives your email address and the message content when we send a password-reset code or an alert.</li>
+<li><b>Hosting and infrastructure provider:</b> stores our database and processes requests on our behalf.</li>
+</ul>
+<p>We may disclose information if required by law or to protect the rights, safety and security of users or the service. If the service is sold or reorganized, your information may be transferred to the new operator under the same commitments.</p>
+<p>Signalstack also pulls <i>public</i> information (such as model listings, releases and research papers) from sources like Hugging Face, GitHub and arXiv. That content is not about you and does not include your personal data.</p>
+
+<h2>6. How long we keep it</h2>
+<ul>
+<li>Account data (email, name, password hash, watchlist, alerts) is kept while your account is open.</li>
+<li>Sessions expire after 7 days. Password-reset codes expire after 10 minutes.</li>
+<li>Notification log entries are kept for service reliability and are deleted with your account.</li>
+</ul>
+<p>When you ask us to delete your account, we delete your personal data from our active systems, except where we must keep something to meet a legal obligation. Backups, if any, are overwritten on their normal schedule.</p>
+
+<h2>7. Security</h2>
+<p>We protect your data with salted password hashing, HttpOnly session cookies, rate limiting, and access limits so only administrators can reach admin tools. No system is perfectly secure, so please use a strong, unique password and tell us right away if you suspect your account has been compromised.</p>
+
+<h2>8. Your choices and rights</h2>
+<p>You can ask us to access, correct, export or delete the personal information we hold about you, to withdraw consent where we rely on it, and to stop alert emails (you can turn alerts off in the app at any time). Depending on where you live, you may have additional rights under local data-protection law, including the right to complain to a data-protection authority. To make a request, email <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a>. We may need to confirm it is really you before acting.</p>
+
+<h2>9. Children</h2>
+<p>Signalstack is not directed to children under 16, and you must be at least 16 to create an account. If you believe a child has given us personal information, contact us and we will delete it.</p>
+
+<h2>10. International use</h2>
+<p>Our providers may process data in countries other than your own. By using the service you understand your information may be transferred to and stored in those locations, with the protections described in this policy.</p>
+
+<h2>11. Changes to this policy</h2>
+<p>If we make material changes, we will update the date above and, where appropriate, ask you to accept the new version when you next log in.</p>
+
+<h2>12. Contact</h2>
+<p>{{OPERATOR_NAME}} · <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a></p>
+
+<footer><a href="/terms">Terms &amp; Conditions</a> · <a href="/">Back to Signalstack</a></footer>
+</main></body></html>

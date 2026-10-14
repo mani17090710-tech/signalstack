@@ -1,0 +1,204 @@
+'use strict';
+// Database: schema, migrations, reference data and the list of live sources.
+const { DatabaseSync } = require('node:sqlite');
+const { COMPANIES, byHandle, byId, isOfficialUrl } = require('./companies');
+const { canonKey, findAll, mergeModels, attachSource } = require('./canon');
+const { addEvidence, refreshVerification, LEGACY } = require('./verify');
+const { categorize, tagInfo, parseParams } = require('./classify');
+
+const SCHEMA = `pragma foreign_keys=on;
+create table if not exists users(id integer primary key,email text unique not null,name text,pw text not null,role text default 'user',created text default current_timestamp);
+create table if not exists sessions(token text primary key,user_id integer not null references users(id) on delete cascade,expires integer);
+create table if not exists password_resets(email text primary key,code text,expires integer);
+create table if not exists orgs(id text primary key,name text);
+create table if not exists models(id text primary key,name text,org_id text references orgs(id),arch text,params text,ctx text,open integer,price text,rel text,ver text,uses text,verified integer default 1);
+create table if not exists benchmarks(id text primary key,name text,ver text,cat text,descr text,meth text);
+create table if not exists results(id integer primary key,model_id text references models(id),bench_id text references benchmarks(id),score real,badge text,evaluator text,date text,source text);
+create table if not exists papers(id text primary key,title text,org_id text references orgs(id),date text,model_ids text,arch text,tldr text,limits text,url text,verified integer default 1);
+create table if not exists events(id integer primary key,sev text,ts text,org_id text references orgs(id),model_id text references models(id),cat text,summary text,source text);
+create table if not exists doc_versions(version text primary key,date text,lines text);
+create table if not exists alerts(id integer primary key,user_id integer references users(id) on delete cascade,org_id text,cat text,minsev text,channel text default 'app');
+create table if not exists watchlist(user_id integer references users(id) on delete cascade,model_id text references models(id),primary key(user_id,model_id));
+create table if not exists sources_config(id text primary key,kind text,label text,config text,enabled integer default 1,last_seen text,last_hash text,last_run text,last_status text,last_error text);
+create table if not exists ingestion_log(id integer primary key,source_id text references sources_config(id),ts text,status text,message text,items integer);
+-- Discovery: every place that listed a model. Verification: who confirms it. Kept in separate tables on purpose.
+create table if not exists model_sources(model_id text not null references models(id) on delete cascade,source text not null,ext_id text not null default '',url text,first_seen text,last_seen text,ctx_tokens integer,price_in real,price_out real,primary key(model_id,source,ext_id));
+create table if not exists model_evidence(id integer primary key,model_id text not null references models(id) on delete cascade,kind text not null,status text not null,url text not null default '',note text,checked_at text,unique(model_id,kind,url));
+create table if not exists model_aliases(alias text primary key,model_id text not null references models(id) on delete cascade,kind text not null default 'id');
+create table if not exists model_papers(model_id text not null references models(id) on delete cascade,arxiv_id text not null,kind text not null,claimed_by text,url text,created_at text,primary key(model_id,arxiv_id,kind));
+create table if not exists notification_log(id integer primary key,user_id integer references users(id) on delete cascade,channel text,status text,error text,ts text default current_timestamp);`;
+
+// Columns added after the first release. Added one by one so existing databases are upgraded in place.
+const COLUMNS = [
+  ['users', 'accepted_at text'], ['users', 'accepted_version text'],
+  ['models', 'likes integer default 0'], ['models', 'downloads integer default 0'], ['models', 'url text'],
+  ['models', 'creator text'], ['models', 'company_id text'], ['models', 'released_at text'], ['models', 'updated_at text'],
+  ['models', 'license text'], ['models', 'pipeline text'], ['models', 'library text'], ['models', 'cats text'],
+  ['models', 'arxiv text'], ['models', 'param_count real'], ['models', 'params_label text'], ['models', 'gated integer default 0'],
+  ['models', "verification text default 'unverified'"], ['models', "source_type text default 'huggingface'"], ['models', 'retrieved_at text'],
+  ['models', 'ctx_tokens integer'], ['models', 'price_in real'], ['models', 'price_out real'], ['models', 'modality text'],
+  ['models', 'trend_rank integer'], ['models', 'trend_at text'], ['models', 'detail_at text'],
+  ['models', 'canon_key text'], ['models', 'model_ref text'], ['models', 'provider_model_id text'], ['models', 'provider_url text'], ['models', 'or_url text'],
+  ['models', 'verified_at text'], ['models', 'seen_at text'], ['models', 'first_seen text'], ['models', 'keep_reason text'],
+  ['models', 'ctx_source text'], ['models', 'price_source text'], ['models', 'delisted_at text'],
+  ['papers', 'arxiv_id text'], ['papers', 'abstract text'], ['papers', 'categories text'], ['papers', 'primary_cat text'], ['papers', "source_role text default 'primary'"],
+  ['papers', 'last_checked text'], ['papers', 'updated_at text'],
+  ['papers', 'authors text'], ['papers', 'published_at text'], ['papers', 'entities text'],
+  ['papers', "verification text default 'verified'"], ['papers', "source_type text default 'arxiv'"], ['papers', 'retrieved_at text'],
+  ['events', 'title text'], ['events', 'detail text'], ['events', 'source_type text'], ['events', 'verification text'],
+  ['events', 'meta text'], ['events', 'company_id text'], ['events', 'retrieved_at text'],
+];
+const INDEXES = `create index if not exists ix_res on results(model_id,bench_id);
+create index if not exists ix_ev on events(ts);create index if not exists ix_ev_cat on events(cat,ts);
+create index if not exists ix_ses on sessions(user_id);create index if not exists ix_log on ingestion_log(ts);
+create index if not exists ix_mrel on models(rel);create index if not exists ix_mlikes on models(likes);
+create index if not exists ix_mcreator on models(creator);create index if not exists ix_mcompany on models(company_id);
+create index if not exists ix_mreleased on models(released_at);create index if not exists ix_mtrend on models(trend_at);
+create index if not exists ix_pdate on papers(date);create index if not exists ix_ppub on papers(published_at);
+create index if not exists ix_mcanon on models(canon_key);create index if not exists ix_mver on models(verification);
+create index if not exists ix_msrc on model_sources(model_id);create index if not exists ix_mev on model_evidence(model_id);
+create index if not exists ix_mpap on model_papers(arxiv_id);create index if not exists ix_parx on papers(arxiv_id)`;
+
+// ---- live sources ----
+// tier: primary = straight from the original publisher, community = open to anyone to publish.
+// Rows carry "v":3. A row you edit and keep at v:3 is never overwritten by later upgrades.
+const SRC_VERSION = 5;
+const org = (id, name) => ({ id, name });
+const BASE_SOURCES = [
+  // Hugging Face: only models that matter. Official lab releases come from the per-lab sources below; these feeds
+  // add models with real traction. The keep/skip rule and its thresholds live in lib/policy.js.
+  ['curated-models', 'curated', 'Hand-kept model list (data/curated-models.json)', { file: 'data/curated-models.json', tier: 'primary' }],
+  ['hf-new-models', 'huggingface', 'Hugging Face — new models gaining traction', { sort: 'createdAt', limit: 100, pages: 3, backfillPages: 5, tier: 'community' }],
+  ['hf-top-liked', 'huggingface', 'Hugging Face — most-liked models', { sort: 'likes', limit: 100, pages: 2, backfillPages: 3, tier: 'community' }],
+  ['hf-top-downloads', 'huggingface', 'Hugging Face — most-downloaded models', { sort: 'downloads', limit: 100, pages: 2, backfillPages: 3, tier: 'community' }],
+  ['hf-trending', 'huggingface', 'Hugging Face — trending models', { sort: 'trendingScore', limit: 100, pages: 2, events: 'trending', maxEvents: 25, trending: true, tier: 'community' }],
+  // Closed and API-only models (OpenAI, Anthropic, Google, xAI and more) are not on Hugging Face. OpenRouter's public
+  // catalogue lists them with context length and pricing. It is a catalogue, not the provider, so these are "Aggregator Listed" until official evidence is attached.
+  ['openrouter-models', 'openrouter', 'OpenRouter — model catalogue', { url: 'https://openrouter.ai/api/v1/models', events: 'release', backfillEvents: 5, maxEvents: 25, tier: 'secondary' }],
+  ['arxiv-llm', 'arxiv', 'arXiv — language model papers', { query: 'cat:cs.CL AND abs:language model', limit: 100, maxEvents: 10, tier: 'primary' }],
+  ['arxiv-cs-cl', 'arxiv', 'arXiv — cs.CL (language)', { category: 'cs.CL', limit: 100, backfillPages: 8, maxEvents: 10, tier: 'primary' }],
+  ['arxiv-cs-lg', 'arxiv', 'arXiv — cs.LG (machine learning)', { category: 'cs.LG', limit: 100, backfillPages: 8, maxEvents: 10, tier: 'primary' }],
+  ['arxiv-cs-ai', 'arxiv', 'arXiv — cs.AI', { category: 'cs.AI', limit: 100, backfillPages: 8, maxEvents: 10, tier: 'primary' }],
+  ['arxiv-cs-cv', 'arxiv', 'arXiv — cs.CV (vision)', { category: 'cs.CV', limit: 100, backfillPages: 8, maxEvents: 10, tier: 'primary' }],
+  ['arxiv-stat-ml', 'arxiv', 'arXiv — stat.ML', { category: 'stat.ML', limit: 100, backfillPages: 4, maxEvents: 10, tier: 'primary' }],
+  ['arxiv-cs-ro', 'arxiv', 'arXiv — cs.RO (robotics)', { category: 'cs.RO', limit: 100, backfillPages: 4, maxEvents: 10, tier: 'primary' }],
+  ['arxiv-cs-ir', 'arxiv', 'arXiv — cs.IR (retrieval)', { category: 'cs.IR', limit: 100, backfillPages: 4, maxEvents: 10, tier: 'primary' }],
+  // Fetches metadata for papers that models cite (arXiv ids found on model cards) but that are not stored yet.
+  ['arxiv-cited', 'arxiv_cited', 'arXiv — papers cited by models', { batch: 40, tier: 'primary' }],
+  ['gh-transformers', 'github', 'GitHub — huggingface/transformers', { owner: 'huggingface', repo: 'transformers', tier: 'primary' }],
+  ['gh-llamacpp', 'github', 'GitHub — ggml-org/llama.cpp', { owner: 'ggml-org', repo: 'llama.cpp', tier: 'primary' }],
+  ['gh-vllm', 'github', 'GitHub — vllm-project/vllm', { owner: 'vllm-project', repo: 'vllm', tier: 'primary' }],
+  ['gh-ollama', 'github', 'GitHub — ollama/ollama', { owner: 'ollama', repo: 'ollama', tier: 'primary' }],
+  ['gh-diffusers', 'github', 'GitHub — huggingface/diffusers', { owner: 'huggingface', repo: 'diffusers', tier: 'primary' }],
+  ['gh-openai-python', 'github', 'GitHub — openai/openai-python', { owner: 'openai', repo: 'openai-python', tier: 'primary' }],
+  ['gh-anthropic-sdk', 'github', 'GitHub — anthropics/anthropic-sdk-python', { owner: 'anthropics', repo: 'anthropic-sdk-python', tier: 'primary' }],
+  ['feed-openai', 'feed', 'OpenAI — news', { url: 'https://openai.com/news/rss.xml', org: org('openai', 'OpenAI'), company: 'openai', tier: 'primary' }],
+  ['feed-deepmind', 'feed', 'Google DeepMind — blog', { url: 'https://deepmind.google/blog/rss.xml', org: org('deepmind', 'Google DeepMind'), company: 'google', tier: 'primary' }],
+  ['feed-mistral', 'feed', 'Mistral AI — blog', { url: 'https://mistral.ai/rss.xml', org: org('mistral', 'Mistral AI'), company: 'mistral', tier: 'primary' }],
+  ['feed-hf-blog', 'feed', 'Hugging Face — blog', { url: 'https://huggingface.co/blog/feed.xml', org: org('hfblog', 'Hugging Face Blog'), tier: 'community' }],
+];
+// One source per official Hugging Face namespace: every new model from these labs becomes a "new model" signal.
+const LAB_SOURCES = COMPANIES.flatMap(c => c.hf.map(h => [
+  'hf-org-' + h.toLowerCase(), 'huggingface', `Hugging Face — ${h} (${c.name})`,
+  { author: h, sort: 'createdAt', limit: 50, pages: 2, backfillPages: 4, events: 'release', backfillEvents: 3, company: c.id, tier: 'primary' },
+]));
+const SOURCES = [...BASE_SOURCES, ...LAB_SOURCES];
+
+function openDb(file) {
+  const db = new DatabaseSync(file || 'signalstack.db');
+  db.exec(SCHEMA);
+  for (const [t, c] of COLUMNS) {
+    try { db.exec(`alter table ${t} add column ${c}`); } catch (e) { if (!/duplicate column/i.test(e.message)) throw e; }
+  }
+  db.exec(INDEXES);
+
+  for (const o of [['ext', 'External / Unverified'], ['hf', 'Hugging Face Hub'], ['arxiv', 'arXiv'], ['gh', 'GitHub releases'], ['or', 'OpenRouter'], ['cu', 'Hand-kept model list']]) {
+    db.prepare('insert or ignore into orgs values(?,?)').run(...o);
+  }
+  // Fictional sample rows from older versions are removed; SignalStack shows real data only.
+  try {
+    db.exec(`delete from results where source like 'demo://%';
+      delete from events where source like 'demo://%';
+      delete from papers where url like 'demo://%';
+      delete from models where id in ('meridian-3','meridian-mini','aster-r2','kestrel-70b','kestrel-moe','aster-long');
+      delete from benchmarks where id in ('codeeval-v3','codeeval-v2','reasonbench','mathset');
+      delete from doc_versions where version in ('v4.1','v4.2','v4.3');
+      delete from orgs where id in ('na','al','ko');`);
+  } catch (e) { console.error('Demo cleanup failed:', e.message); }
+
+  for (const [id, kind, label, cfg] of SOURCES) {
+    const c = JSON.stringify({ v: SRC_VERSION, ...cfg });
+    db.prepare('insert or ignore into sources_config(id,kind,label,config,enabled) values(?,?,?,?,1)').run(id, kind, label, c);
+    db.prepare(`update sources_config set kind=?,label=?,config=? where id=? and config not like '%"v":${SRC_VERSION}%'`).run(kind, label, c, id);
+  }
+  backfillModels(db);
+  migrateCanonical(db);
+  return db;
+}
+
+// Rows saved by earlier versions lack the new fields. Fill them from what those rows already hold.
+function backfillModels(db) {
+  const rows = db.prepare("select id,name,uses,rel from models where org_id='hf' and (cats is null or creator is null or released_at is null)").all();
+  if (!rows.length) return;
+  const upd = db.prepare('update models set creator=?,company_id=?,verification=?,released_at=coalesce(released_at,?),cats=?,pipeline=?,license=coalesce(license,?),arxiv=coalesce(arxiv,?),param_count=coalesce(param_count,?),params_label=coalesce(params_label,?) where id=?');
+  db.exec('begin');
+  try {
+    for (const r of rows) {
+      const tags = (r.uses || '').split(',').filter(Boolean);
+      const creator = String(r.name || '').split('/')[0];
+      const co = byHandle(creator), c = categorize({ name: r.name, pipeline: '', tags }), ti = tagInfo(tags), pp = parseParams(r.name);
+      upd.run(creator, co ? co.id : null, co ? 'verified' : 'community', r.rel ? r.rel + 'T00:00:00.000Z' : null,
+        ',' + c.cats.join(',') + ',', c.pipeline || null, ti.license || null, ti.arxiv.join(',') || null, pp ? pp.count : null, pp ? pp.label : null, r.id);
+    }
+    db.exec('commit');
+  } catch (e) { db.exec('rollback'); throw e; }
+}
+
+
+// Brings rows saved by earlier versions into the canonical model: gives every model a canonical key, records where it
+// was discovered and what evidence exists for it, then merges duplicates. Safe to run on every start: it only
+// touches rows that have not been migrated, and merging keeps old ids working through model_aliases.
+function migrateCanonical(db) {
+  // The three-level vocabulary of earlier versions is mapped onto the four statuses exactly once (tracked in user_version).
+  if ((db.prepare('pragma user_version').get().user_version || 0) < 1) {
+    db.exec(`update events set verification=case verification when 'verified' then 'source_verified' when 'reported' then 'aggregator_listed' when 'community' then 'aggregator_listed' else verification end
+        where verification in ('verified','reported','community');
+      update papers set verification=case verification when 'verified' then 'source_verified' when 'reported' then 'aggregator_listed' when 'community' then 'aggregator_listed' else verification end
+        where verification in ('verified','reported','community');
+      pragma user_version=1`);
+  }
+  db.exec(`update papers set arxiv_id=substr(id,7) where arxiv_id is null and id like 'arxiv:%';
+    update papers set last_checked=retrieved_at where last_checked is null`);
+  const rows = db.prepare('select * from models where canon_key is null').all();
+  if (rows.length) {
+    db.exec('begin');
+    try {
+      for (const m of rows) {
+        const kind = m.id.split(':')[0], ref = m.id.slice(kind.length + 1), key = canonKey('', ref), now = new Date().toISOString();
+        const co = m.company_id ? byId[m.company_id] : null;
+        const sets = { canon_key: key, model_ref: ref, first_seen: m.retrieved_at || now, seen_at: m.retrieved_at || now };
+        if (kind === 'or') Object.assign(sets, { or_url: m.url, ctx_source: m.ctx_tokens != null ? 'openrouter' : null, price_source: m.price_in != null ? 'openrouter' : null });
+        if (kind === 'cu') Object.assign(sets, { provider_url: m.url, ctx_source: m.ctx_tokens != null ? 'official' : null, price_source: m.price_in != null ? 'official' : null });
+        if (kind === 'hf' && m.company_id) sets.provider_url = m.url;
+        if (kind === 'hf') sets.keep_reason = m.company_id ? 'official' : 'popular';
+        const cols = Object.keys(sets);
+        db.prepare(`update models set ${cols.map(c => c + '=?').join(',')} where id=?`).run(...cols.map(c => sets[c]), m.id);
+        attachSource(db, m.id, { source: kind === 'hf' ? 'huggingface' : kind === 'or' ? 'openrouter' : 'curated', ext: ref, url: m.url, ctx: m.ctx_tokens, priceIn: m.price_in, priceOut: m.price_out });
+        if (kind === 'hf' && m.company_id) addEvidence(db, m.id, 'publisher_namespace', 'https://huggingface.co/' + m.creator, `Published under ${co ? co.name : m.creator}’s own Hugging Face account.`);
+        else if (kind === 'hf' || kind === 'or') addEvidence(db, m.id, 'aggregator', m.url || '', kind === 'or' ? 'Listed in the OpenRouter catalogue.' : 'Community model on Hugging Face.');
+        else if (kind === 'cu' && isOfficialUrl(co, m.url)) addEvidence(db, m.id, 'official_announcement', m.url, `Announcement on ${new URL(m.url).hostname}.`);
+        refreshVerification(db, m.id);
+      }
+      db.exec('commit');
+    } catch (e) { db.exec('rollback'); throw e; }
+  }
+  // Merge duplicates: rows that share a canonical key.
+  const dup = db.prepare('select canon_key k from models where canon_key is not null group by canon_key having count(*)>1').all();
+  for (const { k } of dup) {
+    const group = findAll(db, k);
+    for (const extra of group.slice(1)) mergeModels(db, group[0].id, extra.id);
+    refreshVerification(db, group[0].id);
+  }
+}
+
+module.exports = { openDb, SOURCES, SRC_VERSION };
