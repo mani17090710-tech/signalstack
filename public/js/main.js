@@ -2,6 +2,7 @@
 import { $, $$, api, html, raw, mount, state, failed, skeleton } from './lib.js';
 import { openAuth } from './auth.js';
 import { showIntro, introSeen } from './intro.js';
+import * as motion from './motion.js';
 import * as home from './views/home.js';
 import * as signals from './views/signals.js';
 import * as models from './views/models.js';
@@ -54,6 +55,7 @@ let seq = 0;
 export async function route() {
   const [r, ...rest] = (location.hash.replace(/^#\/?/, '') || 'now').split('/'), arg = rest.join('/');
   const [view, navKey] = VIEWS[r] || [null, ''];
+  if (view) motion.leave(r);
   $$('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === navKey || a.dataset.nav === r));
   const main = $('#main'), mine = ++seq;
   if (!view) { mount(main, html`<div class="empty"><h3>Page not found</h3><p>That address doesn’t exist.</p><a href="#now">Go to Home</a></div>`); return; }
@@ -63,6 +65,7 @@ export async function route() {
     const out = await (view.render || view.default)(decodeURIComponent(arg));
     if (mine !== seq) return; // a newer navigation started; drop this result
     mount(main, out.html || out); if (out.after) out.after(main);
+    motion.enter(main);
     document.title = (out.title ? out.title + ' | ' : '') + 'Signalstack';
   } catch (e) {
     if (mine !== seq) return;
