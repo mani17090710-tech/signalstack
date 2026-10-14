@@ -55,7 +55,6 @@ let seq = 0;
 export async function route() {
   const [r, ...rest] = (location.hash.replace(/^#\/?/, '') || 'now').split('/'), arg = rest.join('/');
   const [view, navKey] = VIEWS[r] || [null, ''];
-  if (view) motion.leave(r);
   $$('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === navKey || a.dataset.nav === r));
   const main = $('#main'), mine = ++seq;
   if (!view) { mount(main, html`<div class="empty"><h3>Page not found</h3><p>That address doesn’t exist.</p><a href="#now">Go to Home</a></div>`); return; }

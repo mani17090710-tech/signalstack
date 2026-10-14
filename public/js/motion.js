@@ -1,26 +1,5 @@
-// Motion helpers. No libraries: the blade runs on the Web Animations API (compositor only), reveals are CSS classes,
-// and count-ups are a short requestAnimationFrame loop. Every helper does nothing when the person prefers reduced motion.
+// Motion helpers. No libraries: reveals are CSS classes and count-ups are a short requestAnimationFrame loop. Every helper does nothing when the person prefers reduced motion.
 const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-let blade, bar, last = null, playing = false;
-
-function ensureBlade() {
-  if (blade) return;
-  blade = document.createElement('div'); blade.id = 'blade'; blade.setAttribute('aria-hidden', 'true');
-  bar = document.createElement('i'); const echo = document.createElement('b');
-  blade.append(bar, echo); document.body.append(blade); blade.echo = echo;
-}
-
-// A diagonal blade sweeps once across the page area when the person moves to a different section.
-export function leave(route) {
-  const from = last; last = route;
-  if (from === null || from === route || calm() || playing || document.querySelector('dialog[open], #intro')) return;
-  ensureBlade(); playing = true;
-  const W = innerWidth, ease = 'cubic-bezier(.65, 0, .35, 1)', opt = { duration: 620, easing: ease, fill: 'none' };
-  const move = (el, from, to, o) => el.animate([{ transform: `translateX(${from}px) skewX(-12deg)`, opacity: 1 }, { transform: `translateX(${to}px) skewX(-12deg)`, opacity: 1 }], o);
-  const a = move(bar, -0.5 * W, 1.15 * W, opt);
-  move(blade.echo, -0.4 * W, 1.25 * W, { ...opt, duration: 560 });
-  a.onfinish = a.oncancel = () => { playing = false; };
-}
 
 const REVEAL = '.sig, .mcard, .rows > *, a.panel';
 const parse = t => { const m = /^(\d[\d,]*(?:\.\d+)?)([kMB])?$/.exec(t.trim()); return m ? { n: parseFloat(m[1].replace(/,/g, '')), dec: (m[1].split('.')[1] || '').length, suf: m[2] || '', comma: m[1].includes(',') } : null; };

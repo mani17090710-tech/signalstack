@@ -1,11 +1,5 @@
-/* Motion: a blade sweep between pages, staggered reveals, count-up numbers and tactile hover states.
+/* Motion: staggered reveals, count-up numbers and tactile hover states.
    Everything animates transform or opacity only, and everything is switched off for people who prefer reduced motion. */
-
-#blade { position: fixed; left: 0; right: 0; top: var(--top-h); bottom: 0; z-index: 15; overflow: hidden; pointer-events: none; }
-#blade i { position: absolute; top: 0; bottom: 0; left: 0; width: 44vw; opacity: 0; will-change: transform; transform: translateX(-70vw) skewX(-12deg);
-  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .06) 0 2px, transparent 2px 16px), linear-gradient(115deg, rgba(31, 166, 201, 0) 0%, rgba(43, 111, 224, .5) 55%, rgba(29, 63, 176, .7) 100%); }
-#blade i::after { content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 3px; background: #fff; box-shadow: 0 0 22px 5px rgba(255, 255, 255, .6); }
-#blade b { position: absolute; top: 0; bottom: 0; left: 0; width: 7px; opacity: 0; will-change: transform; transform: translateX(-70vw) skewX(-12deg); background: var(--cy); box-shadow: 0 0 24px 6px var(--cy); }
 
 @media (prefers-reduced-motion: no-preference) {
   /* staggered reveal: JS adds .m-in and --md (delay) to each card/row when a page loads */
