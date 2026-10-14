@@ -1,0 +1,4 @@
+# local databases
+*.db
+*.db-wal
+*.db-shm
