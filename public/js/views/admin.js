@@ -8,6 +8,12 @@ export async function render() {
   return {
     title: 'Admin',
     html: html`${pageHead('Admin', 'Source health, review queue and users.')}
+          <section class="blk">
+        <header><h2>Database backup</h2></header>
+        <p class="fine">Download a copy of your SignalStack database.</p>
+        <button id="backup">Download database backup</button>
+        <p id="backup-result" class="fine"></p>
+      </section>
       <p class="snapshot">${[['Users', s.users], ['Models', s.models], ['Papers', s.papers], ['Signals', s.events], ['Pending review', s.pendingModels + s.pendingPapers], ['Emails sent', s.emailsSent], ['Emails failed', s.emailsFailed]].map(([l, n]) => html`<span><b>${n}</b>${l}</span>`)}</p>
       ${s.emailConfigured ? '' : html`<p class="warn mt">Email is not set up. Add RESEND_API_KEY to the environment to enable email alerts.</p>`}
       <section class="blk"><header><h2>Test email</h2></header><div class="toolbar"><input id="temail" type="email" placeholder="Send a test email to" aria-label="Test email address"><button id="tsend">Send test email</button></div><div id="tresult"></div></section>
@@ -18,7 +24,43 @@ export async function render() {
       <section class="blk"><header><h2>Users</h2></header><div class="panel rows">${users.map(u => html`<div>${u.email} ${u.role === 'admin' ? html`<span class="tag">admin</span>` : ''} <button class="mini" data-id="${u.id}" data-role="${u.role === 'admin' ? 'user' : 'admin'}">${u.role === 'admin' ? 'Demote' : 'Make admin'}</button></div>`)}</div></section>`,
     after(root) {
       const again = () => dispatchEvent(new HashChangeEvent('hashchange'));
-      root.addEventListener('click', async e => {
+      root.addEventListener('click', async e =>
+                if (t.id === 'backup') {
+          t.disabled = true;
+          t.textContent = 'Preparing backup…';
+
+          const result = $('#backup-result', root);
+
+          try {
+            const response = await fetch('/api/admin/backup', {
+              credentials: 'same-origin'
+            });
+
+            if (!response.ok) {
+              throw new Error('Backup failed (HTTP ' + response.status + ').');
+            }
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = response.headers
+              .get('Content-Disposition')
+              ?.match(/filename="([^"]+)"/)?.[1] || 'signalstack-backup.sqlite';
+
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+            result.textContent = 'Backup downloaded. Keep it somewhere safe.';
+          } catch (err) {
+            result.textContent = err.message;
+          } finally {
+            t.disabled = false;
+            t.textContent = 'Download database backup';
+          }
+        }{
         const t = e.target.closest('button'); if (!t) return;
         if (t.dataset.rev) { await api('/admin/review', 'POST', { type: t.dataset.type, id: t.dataset.rev, action: t.dataset.act }); again(); }
         if (t.dataset.bulk) { if (t.dataset.bulkact === 'reject' && !confirm('Permanently delete all pending ' + t.dataset.bulk + 's?')) return; await api('/admin/review/bulk', 'POST', { type: t.dataset.bulk, action: t.dataset.bulkact }); again(); }
