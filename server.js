@@ -2,6 +2,8 @@
 // Signalstack backend. Run: node server.js  (Node 22.5+, no npm install needed)
 const http = require('http'), fs = require('fs'), path = require('path'), cr = require('crypto'), zlib = require('zlib');
 const { openDb } = require('./lib/db');
+const { backup } = require('node:sqlite');
+const os = require('os');
 const { COMPANIES, byId: COMPANY } = require('./lib/companies');
 const { LABEL: VER_LABEL, MEANING: VER_MEANING, STATUSES, evidenceFor } = require('./lib/verify');
 const { resolveId } = require('./lib/canon');
@@ -436,6 +438,53 @@ http.createServer((req, res) => {
       }
 
       // admin
+            // Admin-only database backup
+      if (p === '/api/admin/backup' && req.method === 'GET') {
+        if (!needAdmin()) return;
+
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `signalstack-backup-${stamp}.sqlite`;
+        const backupPath = path.join(
+          os.tmpdir(),
+          `signalstack-${cr.randomBytes(12).toString('hex')}.sqlite`
+        );
+
+        try {
+          await backup(db, backupPath);
+
+          res.writeHead(200, {
+            'Content-Type': 'application/vnd.sqlite3',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Cache-Control': 'no-store'
+          });
+
+          const stream = fs.createReadStream(backupPath);
+
+          stream.on('error', () => {
+            res.destroy();
+          });
+
+          stream.on('close', () => {
+            fs.promises.unlink(backupPath).catch(() => {});
+          });
+
+          res.on('close', () => {
+            fs.promises.unlink(backupPath).catch(() => {});
+          });
+
+          stream.pipe(res);
+        } catch (err) {
+          fs.promises.unlink(backupPath).catch(() => {});
+          console.error('Database backup failed:', err.message);
+
+          if (!res.headersSent) {
+            return reply(500, { error: 'Database backup failed.' });
+          }
+          res.destroy();
+        }
+
+        return;
+      }
       if (p === '/api/admin/summary') {
         if (!needAdmin()) return;
         const c = (t, w = '') => db.prepare(`select count(*) c from ${t} ${w}`).get().c;
