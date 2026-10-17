@@ -24,7 +24,7 @@ export async function render() {
       <section class="blk"><header><h2>Users</h2></header><div class="panel rows">${users.map(u => html`<div>${u.email} ${u.role === 'admin' ? html`<span class="tag">admin</span>` : ''} <button class="mini" data-id="${u.id}" data-role="${u.role === 'admin' ? 'user' : 'admin'}">${u.role === 'admin' ? 'Demote' : 'Make admin'}</button></div>`)}</div></section>`,
     after(root) {
       const again = () => dispatchEvent(new HashChangeEvent('hashchange'));
-      root.addEventListener('click', async e =>
+root.addEventListener('click', async e =>{
                 if (t.id === 'backup') {
           t.disabled = true;
           t.textContent = 'Preparing backup…';
@@ -60,7 +60,7 @@ export async function render() {
             t.disabled = false;
             t.textContent = 'Download database backup';
           }
-        }{
+        }
         const t = e.target.closest('button'); if (!t) return;
         if (t.dataset.rev) { await api('/admin/review', 'POST', { type: t.dataset.type, id: t.dataset.rev, action: t.dataset.act }); again(); }
         if (t.dataset.bulk) { if (t.dataset.bulkact === 'reject' && !confirm('Permanently delete all pending ' + t.dataset.bulk + 's?')) return; await api('/admin/review/bulk', 'POST', { type: t.dataset.bulk, action: t.dataset.bulkact }); again(); }
