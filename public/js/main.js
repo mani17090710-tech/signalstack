@@ -46,7 +46,7 @@ function shell() {
 }
 function drawAcct() {
   const m = state.me;
-  mount($('#acct'), m ? html`<span class="who">${m.name || m.email}</span><button id="lo" class="desk">Log out</button>` : html`<button id="li" class="desk">Log in</button><button class="pri" id="su">Sign up</button>`);
+  mount($('#acct'), m ? html`${m.role === 'admin' ? html`<a class="adminlink" href="#admin">Admin</a>` : ''}<a class="who" href="#you" title="Your account">${m.name || m.email}</a><button id="lo" class="desk">Log out</button>` : html`<button id="li" class="desk">Log in</button><button class="pri" id="su">Sign up</button>`);
   if (m) $('#lo').onclick = async () => { await api('/logout'); state.me = null; state.watch = []; drawAcct(); route(); };
   else { $('#li').onclick = () => openAuth('login', boot); $('#su').onclick = () => openAuth('signup', boot); }
 }
