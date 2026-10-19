@@ -163,7 +163,7 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
 @media (max-width: 860px) {
   .nav { display: none; }
   .top { padding: 0 14px; gap: 10px; }
-  .acct .who, .acct .desk { display: none; }
+  .acct .who, .acct .desk, .acct .adminlink { display: none; }
   main { padding: 20px 16px calc(var(--nav-h) + 40px); }
   .two { grid-template-columns: 1fr; }
   .phead h1 { font-size: 24px; }
@@ -231,3 +231,7 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
 #authdlg .echo { position: absolute; top: 0; left: 0; height: 100%; width: 9px; pointer-events: none; background: var(--cy); box-shadow: 0 0 26px 6px var(--cy); opacity: 0; will-change: transform; transform: skewX(-12deg) translateX(-9999px); }
 #authdlg .auth.is-busy .echo { opacity: .9; }
 @media (prefers-reduced-motion: reduce) { #authdlg .pane.is-on > * { animation: none; } }
+
+/* account bar: name opens "You"; admins also get a direct Admin link */
+.acct a.who { color: var(--mut); max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .acct a.who:hover { color: var(--ink); text-decoration: none; }
+.acct a.adminlink { color: var(--cy); font-weight: 600; border: 1px solid rgba(53, 212, 244, .35); background: var(--cy-bg); border-radius: 8px; padding: 6px 12px; } .acct a.adminlink:hover { text-decoration: none; border-color: var(--cy); }
