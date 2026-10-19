@@ -80,3 +80,18 @@ test('auth requires accepting the terms; personal routes need login', async () =
   assert.strictEqual((await api('/api/watchlist')).status, 401);
   assert.strictEqual((await api('/api/admin/summary')).status, 401);
 });
+test('admin database backup downloads a valid SQLite file and is admin-only', async () => {
+  const base = `http://127.0.0.1:${port}`;
+  assert.strictEqual((await fetch(base + '/api/admin/backup')).status, 401, 'no login, no backup');
+  const login = await fetch(base + '/api/login', { method: 'POST', body: JSON.stringify({ email: 'a@b.co', password: 'longenough' }) });
+  assert.strictEqual(login.status, 200);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const r = await fetch(base + '/api/admin/backup', { headers: { cookie } });
+  assert.strictEqual(r.status, 200, 'the first account is the admin');
+  assert.match(r.headers.get('content-disposition'), /attachment; filename="signalstack-backup-.*\.sqlite"/);
+  assert.strictEqual(r.headers.get('cache-control'), 'no-store');
+  const buf = Buffer.from(await r.arrayBuffer());
+  assert.strictEqual(buf.subarray(0, 15).toString(), 'SQLite format 3', 'a real SQLite database');
+  const temp = fs.readdirSync(os.tmpdir()).filter(f => /^signalstack-[0-9a-f]{24}\.sqlite$/.test(f));
+  assert.strictEqual(temp.length, 0, 'the temporary copy is deleted after sending');
+});
