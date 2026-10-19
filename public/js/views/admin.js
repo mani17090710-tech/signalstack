@@ -24,44 +24,25 @@ export async function render() {
       <section class="blk"><header><h2>Users</h2></header><div class="panel rows">${users.map(u => html`<div>${u.email} ${u.role === 'admin' ? html`<span class="tag">admin</span>` : ''} <button class="mini" data-id="${u.id}" data-role="${u.role === 'admin' ? 'user' : 'admin'}">${u.role === 'admin' ? 'Demote' : 'Make admin'}</button></div>`)}</div></section>`,
     after(root) {
       const again = () => dispatchEvent(new HashChangeEvent('hashchange'));
-root.addEventListener('click', async e =>{
-                if (t.id === 'backup') {
-          t.disabled = true;
-          t.textContent = 'Preparing backup…';
-
+      root.addEventListener('click', async e => {
+        const t = e.target.closest('button'); if (!t) return;
+        if (t.id === 'backup') {
+          t.disabled = true; t.textContent = 'Preparing backup…';
           const result = $('#backup-result', root);
-
           try {
-            const response = await fetch('/api/admin/backup', {
-              credentials: 'same-origin'
-            });
-
-            if (!response.ok) {
-              throw new Error('Backup failed (HTTP ' + response.status + ').');
-            }
-
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
+            const response = await fetch('/api/admin/backup', { credentials: 'same-origin' });
+            if (!response.ok) throw new Error('Backup failed (HTTP ' + response.status + ').');
+            const url = URL.createObjectURL(await response.blob());
             const a = document.createElement('a');
             a.href = url;
-            a.download = response.headers
-              .get('Content-Disposition')
-              ?.match(/filename="([^"]+)"/)?.[1] || 'signalstack-backup.sqlite';
-
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
+            a.download = (response.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'signalstack-backup.sqlite';
+            document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
-
             result.textContent = 'Backup downloaded. Keep it somewhere safe.';
-          } catch (err) {
-            result.textContent = err.message;
-          } finally {
-            t.disabled = false;
-            t.textContent = 'Download database backup';
-          }
+          } catch (err) { result.textContent = err.message; }
+          finally { t.disabled = false; t.textContent = 'Download database backup'; }
+          return;
         }
-        const t = e.target.closest('button'); if (!t) return;
         if (t.dataset.rev) { await api('/admin/review', 'POST', { type: t.dataset.type, id: t.dataset.rev, action: t.dataset.act }); again(); }
         if (t.dataset.bulk) { if (t.dataset.bulkact === 'reject' && !confirm('Permanently delete all pending ' + t.dataset.bulk + 's?')) return; await api('/admin/review/bulk', 'POST', { type: t.dataset.bulk, action: t.dataset.bulkact }); again(); }
         if (t.dataset.src) { await api('/admin/sources', 'POST', { id: t.dataset.src, enabled: t.dataset.on === '1' }); again(); }
