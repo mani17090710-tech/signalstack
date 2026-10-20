@@ -2,9 +2,11 @@
 // its models we have actually stored, and the small satellites are those models. Nothing here is invented.
 import { $, api, html, mount, num } from './lib.js';
 
+// Shown once per visit (per browser tab session), not once ever: a refresh in the same tab skips it, a new visit plays it again.
+// "Replay it" on the home page always works.
 const SEEN = 'ss_intro_seen';
-export const introSeen = () => { try { return localStorage.getItem(SEEN) === '1'; } catch (e) { return false; } };
-const markSeen = () => { try { localStorage.setItem(SEEN, '1'); } catch (e) { /* storage unavailable */ } };
+export const introSeen = () => { try { return sessionStorage.getItem(SEEN) === '1'; } catch (e) { return false; } };
+const markSeen = () => { try { sessionStorage.setItem(SEEN, '1'); } catch (e) { /* storage unavailable */ } };
 
 export async function showIntro(go) {
   const el = document.createElement('div'); el.id = 'intro'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Welcome to Signalstack');

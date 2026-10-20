@@ -111,4 +111,5 @@ export async function boot() {
 }
 shell(); boot();
 setInterval(pollAlerts, 60000);
-if (!introSeen() && !location.hash.replace('#', '')) showIntro(go);
+// Play the intro when someone arrives at the front door (no link to a specific page), once per visit.
+if (!introSeen() && ['', 'now'].includes(location.hash.replace(/^#\/?/, ''))) showIntro(go);
