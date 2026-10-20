@@ -10,7 +10,7 @@ const { resolveId } = require('./lib/canon');
 const resets = require('./lib/reset');
 const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
-const { scoreSignal, SIGNIFICANT } = require('./lib/score');
+const { scoreSignal, SIGNIFICANT, WEIGHTS } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
 
@@ -251,6 +251,24 @@ get(/^\/api\/models\/facets$/, () => {
     verification: STATUSES.map(id => ({ id, label: VER_LABEL[id], n: vers[id] || 0 })),
   };
 });
+
+// How a model compares with its peers, for the graphs on its page. Peers are models of the same kind (API catalogue models, or open models
+// of the same task). Needs at least 8 peers with a value; otherwise the comparison is left out rather than guessed.
+function peersFor(md) {
+  const api = md.source_type === 'openrouter' || md.source_type === 'curated';
+  const col = (c, where, args, floor) => db.prepare(`select ${c} v from models where verified=1 and ${c} is not null and ${c}>${floor} ${where}`).all(...args).map(r => +r.v).sort((a, b) => a - b);
+  const stat = (vals, v) => {
+    if (v == null || vals.length < 8) return null;
+    const n = vals.length, below = vals.filter(x => x < v).length, equal = vals.filter(x => x === v).length;
+    return { value: v, n, percentile: Math.round(100 * (below + 0.5 * equal) / n), median: vals[n >> 1], p25: vals[Math.floor(n * .25)], p75: vals[Math.floor(n * .75)], min: vals[0], max: vals[n - 1] };
+  };
+  if (api) {
+    const w = "and source_type in ('openrouter','curated') and delisted_at is null";
+    return { group: 'API models in the catalogue', price_in: md.price_in > 0 ? stat(col('price_in', w, [], 0), md.price_in) : null, price_out: md.price_out > 0 ? stat(col('price_out', w, [], 0), md.price_out) : null, context: stat(col('ctx_tokens', w, [], 0), md.ctx_tokens || null) };
+  }
+  const w = md.pipeline ? "and source_type='huggingface' and pipeline=?" : "and source_type='huggingface'", a = md.pipeline ? [md.pipeline] : [];
+  return { group: md.pipeline ? `open models for “${md.pipeline}”` : 'open models', likes: stat(col('likes', w, a, -1), md.likes || 0), downloads: stat(col('downloads', w, a, -1), md.downloads || 0), size: md.param_count > 0 ? stat(col('param_count', w, a, 0), md.param_count) : null };
+}
 get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
   let id; try { id = decodeURIComponent(m[1]); } catch (e) { throw fail(400, 'Bad model id.'); }
   id = resolveId(db, id) || id; // an id from before two records were merged still finds the model
@@ -270,7 +288,7 @@ get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
   const similar = db.prepare(M_SELECT + ` where m.verified=1 and m.id!=? and ((?2 is not null and m.company_id=?2) or (?3 is not null and m.pipeline=?3)) order by m.likes desc limit 6`).all(id, md.company_id || null, md.pipeline || null).map(modelOut);
   const co = md.company_id ? byId(md.company_id) : null;
   return {
-    model: out, signal: { score: sig.score, importance: sig.importance, parts: sig.parts, why: sig.why },
+    model: out, signal: { score: sig.score, importance: sig.importance, parts: sig.parts, why: sig.why, weights: WEIGHTS }, peers: peersFor(md),
     company: co ? { id: co.id, name: co.name, site: co.site } : null,
     // Verification is reported separately from discovery: what the evidence says, then where the model was found.
     verification: { status: out.verification, label: VER_LABEL[out.verification], meaning: VER_MEANING[out.verification], last_verified: md.verified_at || null, official_url: md.provider_url || null, evidence: evidenceFor(db, id) },

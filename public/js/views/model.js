@@ -1,4 +1,5 @@
 // Model detail: facts with their source, a Signal Score with its reasoning, related research and history.
+import { explainer, animateExplainer } from './explain.js';
 import { api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi, figureSource, SOURCE_NAME, EVIDENCE_LABEL, dateLabel } from '../lib.js';
 
 const fact = (k, v, unit = '', src = '') => html`<dt>${k}</dt><dd>${v == null || v === '' ? html`<span class="na">${NA}</span>` : v}${v == null || v === '' ? '' : unit}${v == null || v === '' || !src ? '' : html`<span class="fig">${src}</span>`}</dd>`;
@@ -8,12 +9,12 @@ export async function render(id) {
   const name = shortName(m.id);
   return {
     title: name,
+    after: root => animateExplainer(root),
     html: html`<p class="checked"><a href="#models">Model Universe</a> / ${m.company ? html`<a href="#company/${m.company_id}">${m.company}</a>` : m.creator || 'Community'}</p>
       ${pageHead(name.split('/').pop(), m.company ? `Published by ${m.company}` : `Uploaded by ${m.creator || 'an unknown publisher'}`, html`<button data-watch="${m.id}" data-long="1" class="pri">${state.watch.includes(m.id) ? 'Watching' : 'Watch this model'}</button>`)}
       <div class="tags">${verBadge(m.verification)}${m.cats.map(c => html`<span class="tag">${CAT_LABEL[c] || c}</span>`)}${m.gated ? html`<span class="tag">Gated access</span>` : ''}</div>
-      <div class="two mt">
-        <section class="panel"><h2>Signal Score</h2>
-          <div class="sig-head">${scoreRing(s.score, true)}<div><b>${s.importance}</b><p class="detail">SignalStack’s estimate of how much attention this deserves right now.</p></div></div>${scoreBreakdown(s, true)}</section>
+      ${explainer(d)}
+      <div class="mt">
         <section class="panel"><h2>Facts</h2><dl class="kv">
           ${fact('Publisher', m.company || m.creator)}${fact(dateLabel(m), m.released_at ? day(m.released_at) : null)}${isApi(m) ? '' : fact('Last updated', m.updated_at ? day(m.updated_at) : null)}
           ${isApi(m) ? html`<dt>Parameters</dt><dd><span class="na">Not publicly available</span></dd>` : fact('Parameters', m.params)}${fact('License', m.license)}${fact('Task', m.pipeline)}${isApi(m) ? '' : html`${fact('Library', m.library)}${fact('Architecture', m.arch)}`}
