@@ -235,3 +235,33 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
 /* account bar: name opens "You"; admins also get a direct Admin link */
 .acct a.who { color: var(--mut); max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .acct a.who:hover { color: var(--ink); text-decoration: none; }
 .acct a.adminlink { color: var(--cy); font-weight: 600; border: 1px solid rgba(53, 212, 244, .35); background: var(--cy-bg); border-radius: 8px; padding: 6px 12px; } .acct a.adminlink:hover { text-decoration: none; border-color: var(--cy); }
+
+/* ---- 4-digit code boxes (password reset) ---- */
+#authdlg .code { --h: 68px; position: relative; display: flex; gap: 10px; justify-content: center; padding: 10px 6px; margin-block: 4px; }
+#authdlg .code__cursor { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; border: 2px solid var(--cy); border-radius: 17px; opacity: 0; will-change: transform;
+  box-shadow: 0 0 0 4px rgba(53, 212, 244, .12), 0 0 22px rgba(53, 212, 244, .35); }
+#authdlg .code.placed .code__cursor { transition: transform .38s cubic-bezier(.2, .9, .25, 1), width .38s cubic-bezier(.2, .9, .25, 1), height .38s, opacity .2s, border-color .25s, box-shadow .25s; }
+#authdlg .code:focus-within .code__cursor { opacity: 1; }
+#authdlg .code.is-bad .code__cursor { opacity: 1; border-color: var(--bad); box-shadow: 0 0 0 4px rgba(255, 107, 107, .12), 0 0 22px rgba(255, 107, 107, .3); }
+#authdlg .slot { position: relative; flex: 1 1 0; max-width: 64px; height: var(--h); border-radius: 13px; background: var(--panel2); border: 1px solid var(--line2); cursor: text; transition: border-color .25s; }
+#authdlg .slot input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; opacity: 0; border: 0; background: none; padding: 0; font-size: 16px; cursor: text; }
+#authdlg .slot__win { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; display: grid; place-items: center; pointer-events: none; }
+#authdlg .slot__digit { position: relative; width: 100%; height: var(--h); overflow: hidden; font-family: var(--display); font-weight: 600; font-size: 30px; color: var(--ink); font-variant-numeric: tabular-nums; }
+#authdlg .reel { position: absolute; left: 0; right: 0; top: 0; display: block; will-change: transform; }
+#authdlg .reel span { display: grid; place-items: center; height: var(--h); }
+#authdlg .slot.is-filled { border-color: rgba(53, 212, 244, .5); }
+#authdlg .code.is-bad .slot { border-color: rgba(255, 107, 107, .6); }
+#authdlg .slot:focus-within .slot__digit:empty::after { content: ''; display: block; width: 2px; height: 30px; margin: 19px auto 0; border-radius: 2px; background: var(--cy); animation: code-blink 1s steps(2, start) infinite; }
+@keyframes code-blink { to { visibility: hidden; } }
+#authdlg .slot__spark { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 4px var(--cy)); }
+#authdlg .slot__spark rect { fill: none; stroke: var(--cy); stroke-width: 2; stroke-linecap: round; stroke-dasharray: .16 1.2; stroke-dashoffset: .16; opacity: 0; }
+#authdlg .slot.is-spark .slot__spark rect { animation: code-spark .75s cubic-bezier(.4, 0, .2, 1); }
+@keyframes code-spark { 0% { opacity: 1; stroke-dashoffset: .16; } 85% { opacity: 1; } 100% { opacity: 0; stroke-dashoffset: -1; } }
+#authdlg .slot.is-land { animation: land .3s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes land { 40% { transform: scale(1.09); } }
+#authdlg .code.is-bad { animation: code-shake .42s; }
+@keyframes code-shake { 20%, 60% { transform: translateX(-7px); } 40%, 80% { transform: translateX(7px); } }
+@media (prefers-reduced-motion: reduce) {
+  #authdlg .code.placed .code__cursor, #authdlg .slot { transition: none; }
+  #authdlg .slot.is-land, #authdlg .slot.is-spark .slot__spark rect, #authdlg .code.is-bad, #authdlg .slot:focus-within .slot__digit:empty::after { animation: none; }
+}

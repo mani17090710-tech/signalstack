@@ -170,7 +170,7 @@ Dockerfile          Container build
 ## API surface
 
 All `/api/*` routes except `/api/signup`, `/api/login`, `/api/logout` require a
-session cookie. `/api/admin/*` additionally requires the `admin` role. The first account is made admin; set `ADMIN_EMAILS` (comma-separated) to make specific emails admin whenever they sign up or log in, which matters on hosts where the database is reset on each deploy.
+session cookie. `/api/admin/*` additionally requires the `admin` role. The first account is made admin; set `ADMIN_EMAILS` (comma-separated) to make specific emails admin whenever they sign up or log in, which matters on hosts where the database is reset on each deploy. Password-reset codes are 4 digits, expire after 10 minutes, work once, and are discarded after 5 wrong guesses (`lib/reset.js`).
 
 `GET /api/models` (filter `verification=`), `/api/models/:id` (verification, evidence, discovery, papers), `/api/papers/:arxivId`, `/api/benchmarks`, `/api/benchmarks/:id`,
 `/api/papers`, `/api/events`, `/api/orgs`, `/api/docs`, `/api/docs/diff`,
