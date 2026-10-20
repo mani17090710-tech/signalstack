@@ -3,6 +3,7 @@ import { $, $$, api, html, raw, mount, state, failed, skeleton } from './lib.js'
 import { openAuth } from './auth.js';
 import { showIntro, introSeen } from './intro.js';
 import * as motion from './motion.js';
+import { initPreview } from './preview.js';
 import * as home from './views/home.js';
 import * as signals from './views/signals.js';
 import * as models from './views/models.js';
@@ -113,3 +114,4 @@ shell(); boot();
 setInterval(pollAlerts, 60000);
 // Play the intro when someone arrives at the front door (no link to a specific page), once per visit.
 if (!introSeen() && ['', 'now'].includes(location.hash.replace(/^#\/?/, ''))) showIntro(go);
+initPreview();
