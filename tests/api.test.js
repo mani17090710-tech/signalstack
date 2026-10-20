@@ -59,6 +59,15 @@ test('model detail, company and grouped search', async () => {
   assert.ok(s.models.every(x => x.type === 'model' && x.verification_label), 'search results say what they are and how they are sourced');
   assert.ok(s.companies.every(x => x.type === 'company'));
 });
+test('hover preview returns the short version with a score and a source, and 404s unknown models', async () => {
+  const d = await api('/api/models/' + encodeURIComponent('hf:Qwen/Qwen3-Coder-27B') + '/preview');
+  assert.strictEqual(d.status, 200);
+  assert.strictEqual(d.body.model.params, '27B');
+  assert.ok(d.body.signal.score >= 0 && d.body.signal.score <= 100 && d.body.signal.why.length <= 3);
+  assert.ok('source_url' in d.body);
+  assert.strictEqual((await api('/api/models/nope/preview')).status, 404);
+});
+
 test('model page keeps verification (evidence) separate from discovery (sources)', async () => {
   const d = (await api('/api/models/' + encodeURIComponent('hf:Qwen/Qwen3-Coder-27B'))).body;
   assert.strictEqual(d.verification.status, 'source_verified', 'an official Hugging Face namespace is source verified, not verified');

@@ -4,7 +4,7 @@
 import { html, raw, day, num, isApi, shortName, ctxLabel, dateLabel } from '../lib.js';
 
 // What the common task labels mean, in one line each.
-const TASK = {
+export const TASK = {
   'text-generation': ['text generation', 'Writes and continues text: chat answers, summaries, code and drafts.'],
   'text2text-generation': ['text-to-text', 'Turns one piece of text into another, such as translation or summaries.'],
   'image-text-to-text': ['vision and language', 'Reads images together with text and replies in text.'],
@@ -191,4 +191,10 @@ function countUp(el, calm) {
   const to = +el.dataset.count; if (calm || !(to > 0)) return;
   const t0 = performance.now();
   (function step(now) { const k = Math.min((now - t0) / 1000, 1); el.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(step); })(t0);
+}
+
+// One-line "what is it" used by the hover preview, from the same fixed wording as the full page.
+export function plainLine(m) {
+  const api = isApi(m), task = TASK[m.pipeline], who = m.company || m.creator || 'an unknown publisher';
+  return `${api ? 'A closed model used through an API' : 'An open-weight model you can download'} from ${who}${task ? `, built for ${task[0]}` : ''}.`;
 }

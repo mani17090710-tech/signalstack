@@ -269,6 +269,17 @@ function peersFor(md) {
   const w = md.pipeline ? "and source_type='huggingface' and pipeline=?" : "and source_type='huggingface'", a = md.pipeline ? [md.pipeline] : [];
   return { group: md.pipeline ? `open models for “${md.pipeline}”` : 'open models', likes: stat(col('likes', w, a, -1), md.likes || 0), downloads: stat(col('downloads', w, a, -1), md.downloads || 0), size: md.param_count > 0 ? stat(col('param_count', w, a, 0), md.param_count) : null };
 }
+// Small card for the hover preview on Now and Signals: only what is already stored (no outside fetch), so it answers fast.
+get(/^\/api\/models\/([^/]+)\/preview$/, ({ m }) => {
+  let id; try { id = decodeURIComponent(m[1]); } catch (e) { throw fail(400, 'Bad model id.'); }
+  id = resolveId(db, id) || id;
+  const md = db.prepare('select * from models where id=? and verified=1').get(id);
+  if (!md) throw fail(404, 'Model not found.');
+  const out = modelOut(md);
+  const sig = signalOut({ ...(db.prepare('select * from events where model_id=? order by ts desc limit 1').get(id) || { cat: 'Model Release', ts: md.released_at || md.rel, company_id: md.company_id, source: md.url }),
+    mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens, model_id: id });
+  return { model: out, signal: { score: sig.score, importance: sig.importance, why: sig.why.slice(0, 3) }, source_url: md.provider_url || md.url || null };
+});
 get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
   let id; try { id = decodeURIComponent(m[1]); } catch (e) { throw fail(400, 'Bad model id.'); }
   id = resolveId(db, id) || id; // an id from before two records were merged still finds the model
