@@ -1,8 +1,9 @@
 // Log in / sign up / password reset in a native dialog. Guests can browse everything; accounts add watchlist and alerts.
 // Log in and Create account trade places under a diagonal blade; the password-reset steps simply fade in.
 import { $, $$, api, html, mount } from './lib.js';
+import { codeBox } from './codebox.js';
 
-let onDone = () => {}, cur = 'login', busy = false, resetEmail = '';
+let onDone = () => {}, cur = 'login', busy = false, resetEmail = '', box = null;
 const dlg = () => $('#authdlg');
 const RAKE = 12;
 const SLIDE = {
@@ -48,7 +49,7 @@ function build(start) {
       <div class="links"><button type="button" class="swap" data-to="login">Have an account? <b>Log in</b></button><button type="button" class="keep" data-close>Keep browsing</button></div>
     </form>
     <form class="pane" data-pane="forgot" novalidate>
-      <div class="head"><div class="brand"><i></i>Signalstack</div><h2 class="title">Reset your <em>password.</em></h2><p class="sub">Enter your email and we’ll send a 6-digit code.</p></div>
+      <div class="head"><div class="brand"><i></i>Signalstack</div><h2 class="title">Reset your <em>password.</em></h2><p class="sub">Enter your email and we’ll send a 4-digit code.</p></div>
       ${field('fe', 'email', 'email', 'Email', 'email')}
       <div class="err" role="alert"></div>
       <button class="go" type="submit">Send reset code</button>
@@ -57,7 +58,7 @@ function build(start) {
     <form class="pane" data-pane="reset" novalidate>
       <div class="head"><div class="brand"><i></i>Signalstack</div><h2 class="title">Enter your <em>code.</em></h2><p class="sub" id="resetsub">We sent a code to your email. It expires in 10 minutes.</p></div>
       <div class="note" role="status" hidden></div>
-      ${field('rc', 'text', 'code', '6-digit code', 'one-time-code')}
+      <div id="codebox"></div>
       ${field('rp', 'password', 'password', 'New password (8+ characters)', 'new-password')}
       <div class="err" role="alert"></div>
       <button class="go" type="submit">Reset password</button>
@@ -71,6 +72,8 @@ function build(start) {
     </div>
     <span class="echo" id="echo" aria-hidden="true"></span>
   </div>`);
+  box = codeBox($('#codebox'), { onComplete: () => { const p = $('#a-rp'); if (p) p.focus(); } });
+  $('#codebox').addEventListener('input', () => showErr(pane('reset'), '')); // typing a new code clears the old error
   const a = $('#auth');
   $$('.pane', a).forEach(p => {
     const on = p.dataset.pane === start;
@@ -140,9 +143,10 @@ async function submit(k, f) {
       $('#resetsub').textContent = `We sent a code to ${resetEmail}. It expires in 10 minutes.`;
       note('reset', r.message); go('reset'); focusFirst('reset');
     } else if (k === 'reset') {
-      await api('/reset-password', 'POST', { email: resetEmail, code: v.code, password: v.password });
+      if (box.value().length < 4) { btn.disabled = false; return showErr(f, 'Enter the 4-digit code from your email.'); }
+      await api('/reset-password', 'POST', { email: resetEmail, code: box.value(), password: v.password });
       resetEmail = ''; note('login', 'Password updated. Log in with your new password.'); go('login');
     } else { await api('/' + k, 'POST', v); closeAuth(); onDone(); }
-  } catch (x) { showErr(f, x.message); }
+  } catch (x) { showErr(f, x.message); if (k === 'reset' && /code/i.test(x.message)) box.fail(); }
   btn.disabled = false;
 }

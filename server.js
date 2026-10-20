@@ -7,6 +7,7 @@ const os = require('os');
 const { COMPANIES, byId: COMPANY } = require('./lib/companies');
 const { LABEL: VER_LABEL, MEANING: VER_MEANING, STATUSES, evidenceFor } = require('./lib/verify');
 const { resolveId } = require('./lib/canon');
+const resets = require('./lib/reset');
 const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
 const { scoreSignal, SIGNIFICANT } = require('./lib/score');
@@ -395,8 +396,7 @@ http.createServer((req, res) => {
         if (authLimited()) return;
         const email = String(j.email || '').trim().toLowerCase();
         if (db.prepare('select 1 from users where email=?').get(email)) {
-          const code = String(cr.randomInt(100000, 999999));
-          db.prepare('insert into password_resets(email,code,expires) values(?,?,?) on conflict(email) do update set code=excluded.code,expires=excluded.expires').run(email, code, Date.now() + 600000);
+          const code = resets.issue(db, email);
           const r = await sendMail({ to: email, subject: 'Your Signalstack reset code', text: `Your password reset code is ${code}. It expires in 10 minutes. If you didn't request this, ignore this email.` });
           // The code goes to the log only when email could not be sent, so an operator without email set up can still recover an account.
           if (!r.ok) console.log(`[password reset] Email not sent (${r.error}). Code for ${email}: ${code}`);
@@ -407,8 +407,7 @@ http.createServer((req, res) => {
       if (p === '/api/reset-password' && req.method === 'POST') {
         if (authLimited()) return;
         const email = String(j.email || '').trim().toLowerCase(), code = String(j.code || '').trim();
-        const rr = db.prepare('select * from password_resets where email=?').get(email);
-        if (!rr || rr.code !== code || rr.expires < Date.now()) return reply(400, { error: 'That code is invalid or has expired. Request a new one.' });
+        if (!resets.verify(db, email, code)) return reply(400, { error: 'That code is invalid or has expired. Request a new one.' });
         if ((j.password || '').length < 8) return reply(400, { error: 'Password must be at least 8 characters.' });
         db.prepare('update users set pw=? where email=?').run(hashPw(j.password), email);
         db.prepare('delete from password_resets where email=?').run(email);
