@@ -12,11 +12,24 @@ export function mount(el, safe) { el.innerHTML = String(safe); applyBars(el); }
 // CSP forbids inline style attributes, so widths are set from data attributes after rendering.
 export function applyBars(root) { $$('[data-bar]', root).forEach(e => e.style.setProperty('--v', Math.max(0, Math.min(100, +e.dataset.bar || 0)) + '%')); }
 
+// Requests give up after 25 s instead of spinning forever. A GET that fails because the host is still waking up (network error, 502/503/504)
+// is retried twice; writes are never retried, so nothing is submitted twice.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 export async function api(p, method = 'GET', body) {
-  const r = await fetch('/api' + p, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) { const e = new Error(d.error || 'Request failed'); e.code = r.status; throw e; }
-  return d;
+  for (let tries = 0; ; tries++) {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 25000);
+    try {
+      const r = await fetch('/api' + p, { method, signal: ctl.signal, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+      if (method === 'GET' && [502, 503, 504].includes(r.status) && tries < 2) { await sleep(1500 * (tries + 1)); continue; }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(d.error || 'Request failed'); e.code = r.status; throw e; }
+      return d;
+    } catch (x) {
+      if (x.code) throw x;
+      if (method === 'GET' && tries < 2) { await sleep(1500 * (tries + 1)); continue; }
+      const e = new Error(x.name === 'AbortError' ? 'The server is taking too long to answer' : 'Could not reach the server'); e.code = x.name === 'AbortError' ? 'timeout' : 'offline'; throw e;
+    } finally { clearTimeout(timer); }
+  }
 }
 
 export const state = { me: null, watch: [], status: { counts: {} } };
@@ -73,12 +86,36 @@ export const scoreBreakdown = (s, open = false) => html`<details class="why" ${o
   <ul>${s.why.map(w => html`<li>${w}</li>`)}</ul>
   <p class="fine">Signal Score is SignalStack’s own estimate built from the evidence listed here. It is not an objective measure. Parts with no data are left out, not counted as zero.</p></details>`;
 
-export const signalCard = s => html`<article class="sig">
-  <div class="sig-head">${scoreRing(s.score)}<div class="sig-main">
-    <div class="tags"><span class="tag">${SIGNAL_LABEL[s.cat] || s.cat}</span>${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}${verBadge(s.verification)}<span class="imp imp-${s.importance}">${s.importance}</span></div>
-    <h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : safeUrl(s.url) ? html`<a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
-    ${s.detail ? html`<p class="detail">${s.detail}</p>` : ''}
-    ${sourceLine(s)}</div></div>${scoreBreakdown(s)}</article>`;
+// ---------- signal card ----------
+// Where a signal came from (colour-coded) and what kind of thing it is. Both are read from the source type the ingester stored, never guessed.
+const SRC = { huggingface: ['hf', 'Hugging Face'], openrouter: ['or', 'OpenRouter'], curated: ['off', 'Official'], arxiv: ['arx', 'arXiv'], 'github-release': ['gh', 'GitHub'], blog: ['blog', ''] };
+const TYPE = { huggingface: 'Model', openrouter: 'Model', curated: 'Model', arxiv: 'Paper', 'github-release': 'Release', blog: 'Blog' };
+const TYPE_BY_CAT = { 'Model Release': 'Model', Trending: 'Model', Research: 'Paper', 'Open Source': 'Release', Announcement: 'Blog' };
+const TYPE_ICON = {
+  Model: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/>',
+  Paper: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
+  Release: '<path d="M3 12l9-9h7v7l-9 9z"/><circle cx="15" cy="7" r="1.2"/>',
+  Blog: '<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/>',
+  Update: '<circle cx="12" cy="12" r="8"/>',
+};
+export const signalType = s => TYPE[s.source_type] || TYPE_BY_CAT[s.cat] || 'Update';
+export const sourceInfo = s => { const k = SRC[s.source_type]; return [k ? k[0] : 'other', (k && k[1]) || host(s.url) || 'Source']; };
+// Release notes and abstracts can carry markdown; show them as plain sentences.
+const plain = t => String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_>#]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+export const signalCard = s => {
+  const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url), sum = plain(s.detail || (s.summary !== s.title ? s.summary : ''));
+  return html`<article class="sig src-${sk}">
+    <header class="sc-top">
+      <div class="sc-chips"><span class="sc-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(TYPE_ICON[type])}</svg>${type}</span><span class="srcb">${sname}</span><time class="sc-time" data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time></div>
+      ${scoreRing(s.score)}
+    </header>
+    <h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
+    ${sum ? html`<p class="sc-sum">${sum}</p>` : ''}
+    <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}${verBadge(s.verification)}<span class="imp imp-${s.importance}">${s.importance}</span></div>
+    <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>` : ''}</div>
+    ${scoreBreakdown(s)}</article>`;
+};
 
 export const modelCard = m => html`<article class="mcard">
   <div class="mc-top"><a class="mc-name" href="#model/${mid(m.id)}">${shortName(m.id).split('/').pop()}</a>${m.trend_rank ? html`<span class="tag">Trending #${m.trend_rank}</span>` : ''}</div>
@@ -88,8 +125,13 @@ export const modelCard = m => html`<article class="mcard">
     : html`<div><dt>Size</dt><dd>${m.params || NA}</dd></div><div><dt>Likes</dt><dd>${num(m.likes)}</dd></div><div><dt>Downloads</dt><dd>${num(m.downloads)}</dd></div><div><dt>${dateLabel(m)}</dt><dd>${day(m.released_at)}</dd></div>`}</dl>
   <button class="mini" data-watch="${m.id}">${state.watch.includes(m.id) ? 'Watching' : 'Watch'}</button></article>`;
 
-export const skeleton = (n = 4) => html`<div class="skel" aria-busy="true" aria-label="Loading">${Array.from({ length: n }, () => html`<div class="sk"><i></i><i></i><i></i></div>`)}</div>`;
-export const empty = (title, body, action) => html`<div class="empty"><h3>${title}</h3><p>${body}</p>${action || ''}</div>`;
-export const failed = e => html`<div class="empty err"><h3>This page didn’t load</h3><p>${e.message}. <button class="link" data-action="reload">Try again</button></p></div>`;
+// Loading placeholder shaped like a signal card, so the page does not jump when the real cards arrive. After a few seconds it explains the wait
+// (pure CSS, no timers): free hosting sleeps when idle and the first request can take up to a minute.
+export const skeleton = (n = 4) => html`<div class="skel" aria-busy="true" aria-label="Loading"><div class="sk-list">${Array.from({ length: n }, () => html`<div class="sk"><b class="sk-ring"></b><div><i></i><i></i><i></i></div></div>`)}</div>
+  <p class="slow" role="status">Still loading. The server may be waking up after a quiet spell; the first visit can take up to a minute.</p></div>`;
+const EMPTY_ICON = { signal: '<path d="M4 18a8 8 0 0 1 8-8m-8 8a14 14 0 0 1 14-14M4 18h.01"/>', filter: '<path d="M3 5h18l-7 8v6l-4-2v-4z"/>', data: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' };
+export const empty = (title, body, action, kind = 'data') => html`<div class="empty"><svg class="empty-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(EMPTY_ICON[kind] || EMPTY_ICON.data)}</svg><h3>${title}</h3><p>${body}</p>${action ? html`<div class="empty-act">${action}</div>` : ''}</div>`;
+export const failed = e => html`<div class="empty err"><svg class="empty-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw('<circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 3h.01"/>')}</svg><h3>This page didn’t load</h3><p>${e.message}. Your connection or the server may be slow; nothing was lost.</p><div class="empty-act"><button class="pri" data-action="reload">Try again</button></div></div>`;
 export const pageHead = (title, sub, extra) => html`<header class="phead"><div><h1>${title}</h1>${sub ? html`<p class="sub">${sub}</p>` : ''}</div>${extra || ''}</header>`;
-export const checked = t => html`<span class="checked">Last checked ${ago(t)}</span>`;
+// "Last updated 4 min ago" with a live dot. main.js refreshes every [data-ts] text once a minute, so the wording never goes stale on screen.
+export const checked = t => html`<span class="upd ${t && Date.now() - parse(t) > 36e5 ? 'stale' : ''}" title="${t ? stamp(t) : 'No update recorded yet'}"><i class="upd-dot" aria-hidden="true"></i>Last updated <b data-ts="${t || ''}">${t ? ago(t) : 'not yet'}</b></span>`;
