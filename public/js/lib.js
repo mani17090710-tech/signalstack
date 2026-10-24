@@ -32,7 +32,9 @@ export async function api(p, method = 'GET', body) {
   }
 }
 
-export const state = { me: null, watch: [], status: { counts: {} } };
+export const state = { me: null, watch: [], follows: [], status: { counts: {} }, whoReady: Promise.resolve() };
+// Follow / Following toggle for a lab (kind 'lab', key = lab id) or a model series (kind 'family', key = 'lab:series'). main.js handles the click.
+export const followBtn = (kind, key, big = false) => { const on = state.follows.some(f => f.kind === kind && f.key === key); return html`<button class="follow ${big ? 'pri' : ''} ${on ? 'on' : ''}" data-follow="${kind}|${key}" aria-pressed="${on}">${on ? 'Following' : 'Follow'}</button>`; };
 
 // ---------- formatting ----------
 export const num = n => { n = +n || 0; return n >= 1e9 ? (n / 1e9).toFixed(1).replace('.0', '') + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1).replace('.0', '') + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.0', '') + 'k' : String(n); };
@@ -151,7 +153,7 @@ export const signalRow = s => {
   const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url);
   return html`<article class="sig-row src-${sk}">${scoreRing(s.score)}
     <div class="sr-main"><h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
-      <p class="sr-meta"><span class="sc-type">${type}</span><span class="srcb">${sname}</span><time data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time>${s.company ? html`<a class="sr-co" href="#company/${s.company_id}">${s.company}</a>` : ''}</p></div>
+      <p class="sr-meta"><span class="sc-type">${type}</span><span class="srcb">${sname}</span><time data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time>${s.company ? html`<a class="sr-co" href="#company/${s.company_id}">${s.company}</a>` : ''}${s.because ? html`<span class="because">${s.because}</span>` : ''}</p></div>
     ${url ? html`<a class="sr-go" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open original source for ${s.title}" title="Open original source">↗</a>` : ''}</article>`;
 };
 

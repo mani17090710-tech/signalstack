@@ -7,7 +7,9 @@ let rows = 0, total = 0, token = 0;
 const SORTS = [['new', 'Newest'], ['trending', 'Trending'], ['popular', 'Most liked'], ['downloads', 'Most downloaded'], ['params', 'Largest']];
 const FILTERS = ['source', 'verification', 'company', 'license', 'task'];
 
-export async function render() {
+export async function render(arg = '') {
+  // A link can preselect filters, for example #models/company=qwen
+  if (arg) { const a = new URLSearchParams(arg); for (const k of ['company', 'cat', 'license', 'task', 'source', 'verification']) f[k] = a.get(k) || ''; f.q = ''; f.official = false; }
   const fa = await api('/models/facets');
   const cats = fa.cats.filter(c => c.n > 0); // a category with no models is hidden rather than shown empty
   const label = {

@@ -10,6 +10,7 @@ const { resolveId } = require('./lib/canon');
 const resets = require('./lib/reset');
 const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
+const { seriesOf } = require('./lib/family');
 const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
@@ -314,8 +315,12 @@ get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
       evidence: { kind: r.kind, claimed_by: r.claimed_by, url: r.evidence_url } }));
   const similar = db.prepare(M_SELECT + ` where m.verified=1 and m.id!=? and ((?2 is not null and m.company_id=?2) or (?3 is not null and m.pipeline=?3)) order by m.likes desc limit 6`).all(id, md.company_id || null, md.pipeline || null).map(modelOut);
   const co = md.company_id ? byId(md.company_id) : null;
+  // The model series this model belongs to (grouped by name, only among the same lab's models), for the timeline link on its page.
+  const fam = md.company_id ? seriesOf(labRows(md.company_id)).find(g => g.models.some(x => x.id === id)) : null;
+  const family = fam ? { key: fam.key, label: fam.label, company_id: fam.company_id, count: fam.models.length, first: fam.first, last: fam.last,
+    generation: (fam.models.find(x => x.id === id) || {}).generation, generations: fam.generations.map(x => ({ label: x.label, first: x.first, count: x.models.length, current: x.models.some(y => y.id === id) })) } : null;
   return {
-    model: out, signal: { score: sig.score, importance: sig.importance, parts: sig.parts, why: sig.why, weights: WEIGHTS }, peers: peersFor(md),
+    family, model: out, signal: { score: sig.score, importance: sig.importance, parts: sig.parts, why: sig.why, weights: WEIGHTS }, peers: peersFor(md),
     company: co ? { id: co.id, name: co.name, site: co.site } : null,
     // Verification is reported separately from discovery: what the evidence says, then where the model was found.
     verification: { status: out.verification, label: VER_LABEL[out.verification], meaning: VER_MEANING[out.verification], last_verified: md.verified_at || null, official_url: md.provider_url || null, evidence: evidenceFor(db, id) },
@@ -331,12 +336,28 @@ get(/^\/api\/companies$/, () => COMPANIES.map(c => ({
   models: db.prepare('select count(*) c from models where company_id=?').get(c.id).c,
   signals30d: db.prepare("select count(*) c from events where company_id=? and ts>=datetime('now','-30 day')").get(c.id).c,
 })));
+// A lab's models as plain rows, used to work out its model series.
+const labRows = id => db.prepare('select m.* from models m where m.verified=1 and m.company_id=? and m.delisted_at is null').all(id);
+const seriesBrief = g => ({ key: g.key, label: g.label, count: g.models.length, generations: g.generations.length, first: g.first, last: g.last, latest: modelOut(g.models[g.models.length - 1]) });
 get(/^\/api\/companies\/([\w-]+)$/, ({ m }) => {
   const c = byId(m[1]); if (!c) throw fail(404, 'Company not found.');
+  const papers = db.prepare("select * from papers where verified=1 and entities like ? order by coalesce(published_at,date) desc limit 8").all('%"' + c.id + '"%').map(x => paperOut(x, false));
   return {
-    company: { id: c.id, name: c.name, site: c.site, hf: c.hf, gh: c.gh },
+    company: { id: c.id, name: c.name, site: c.site, hf: c.hf, gh: c.gh, domains: c.domains, openrouter: c.or || [] },
     models: db.prepare(M_SELECT + ' where m.verified=1 and m.company_id=? order by coalesce(m.released_at,m.rel) desc limit 40').all(c.id).map(modelOut),
     signals: signals(new URLSearchParams('window=30d&company=' + c.id)).slice(0, 30),
+    series: seriesOf(labRows(c.id)).map(seriesBrief),
+    papers,
+    stats: { models: db.prepare('select count(*) c from models where verified=1 and company_id=?').get(c.id).c, papers: db.prepare("select count(*) c from papers where verified=1 and entities like ?").get('%"' + c.id + '"%').c, signals30d: db.prepare("select count(*) c from events where company_id=? and ts>=datetime('now','-30 day')").get(c.id).c },
+  };
+});
+// The history of one model series: generations from oldest to newest, with every model in each.
+get(/^\/api\/families\/([\w-]+)\/([\w.-]+)$/, ({ m }) => {
+  const c = byId(m[1]); if (!c) throw fail(404, 'Lab not found.');
+  const g = seriesOf(labRows(c.id)).find(x => x.key === c.id + ':' + m[2].toLowerCase()); if (!g) throw fail(404, 'No series with that name for this lab.');
+  return {
+    company: { id: c.id, name: c.name }, series: { key: g.key, label: g.label, count: g.models.length, first: g.first, last: g.last },
+    generations: g.generations.map(x => ({ label: x.label, first: x.first, last: x.last, models: x.models.map(modelOut) })),
   };
 });
 
@@ -467,6 +488,34 @@ http.createServer((req, res) => {
       const needAdmin = () => { if (!need()) return false; if (!isAdmin) { reply(403, { error: 'This area is for admins only.' }); return false; } return true; };
 
       // personal (login required)
+      // Follow a lab or a model series; the Now page shows what is new from everything you follow or watch.
+      if (p === '/api/follows') {
+        if (!need()) return;
+        if (req.method === 'POST' || req.method === 'DELETE') {
+          const kind = String(j.kind || ''), key = String(j.key || '').slice(0, 80);
+          const valid = kind === 'lab' ? !!byId(key) : kind === 'family' ? /^[\w-]+:[\w.-]+$/.test(key) && !!byId(key.split(':')[0]) : false;
+          if (!valid) return reply(400, { error: 'Unknown lab or series.' });
+          if (req.method === 'POST') {
+            if (db.prepare('select count(*) c from follows where user_id=?').get(uid).c >= 200) return reply(400, { error: 'You are following the maximum number of labs and series.' });
+            db.prepare('insert or ignore into follows(user_id,kind,key) values(?,?,?)').run(uid, kind, key);
+          } else db.prepare('delete from follows where user_id=? and kind=? and key=?').run(uid, kind, key);
+        }
+        return reply(200, db.prepare('select kind,key from follows where user_id=? order by created').all(uid));
+      }
+      if (p === '/api/watching') {
+        if (!need()) return;
+        const fol = db.prepare('select kind,key from follows where user_id=?').all(uid), watched = new Set(db.prepare('select model_id from watchlist where user_id=?').all(uid).map(r => r.model_id));
+        const labs = new Map(fol.filter(f => f.kind === 'lab' && byId(f.key)).map(f => [f.key, byId(f.key).name])), fam = new Map(), famLabel = new Map();
+        for (const f of fol.filter(x => x.kind === 'family')) {
+          const g = seriesOf(labRows(f.key.split(':')[0])).find(x => x.key === f.key); if (!g) continue;
+          famLabel.set(f.key, `${byId(g.company_id).name} ${g.label}`); g.models.forEach(mm => fam.set(mm.id, f.key));
+        }
+        const pool = signals(new URLSearchParams('window=30d')).map(sg => {
+          const because = watched.has(sg.model_id) ? 'You watch this model' : fam.has(sg.model_id) ? `You follow ${famLabel.get(fam.get(sg.model_id))}` : labs.has(sg.company_id) ? `You follow ${labs.get(sg.company_id)}` : null;
+          return because ? { ...sg, because } : null;
+        }).filter(Boolean);
+        return reply(200, { items: ranked(pool).slice(0, 8), total: pool.length, follows: { labs: [...labs].map(([id, name]) => ({ id, name })), families: [...famLabel].map(([key, label]) => ({ key, label })), models: watched.size } });
+      }
       if (p === '/api/watchlist') {
         if (!need()) return;
         if (req.method === 'POST') db.prepare('insert or ignore into watchlist values(?,?)').run(uid, j.model_id);

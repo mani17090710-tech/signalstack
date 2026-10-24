@@ -124,3 +124,49 @@
 .trust[hidden] { display: none; } .trust .trust-bar { justify-content: center; margin: 0 0 8px; } .trust p { margin: 0; font-size: 13px; color: var(--dim); }
 body[data-route="now"] .trust .trust-bar { display: none; }
 @media (min-width: 861px) { .trust { padding-bottom: 36px; } }
+
+/* ---- Lab pages, model timeline, follow ---- */
+.labhero { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin: 6px 0 22px; }
+.labhero h1 { font-size: 30px; } .labact { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.follow { min-height: 40px; padding: 8px 18px; border-radius: 9px; font-weight: 600; } .follow.on { background: var(--cy-bg); border-color: rgba(53, 212, 244, .5); color: var(--cy); } .follow.on::before { content: '\2713\00a0'; }
+.labsrc { margin-bottom: 26px; } .labsrc h2 { font-size: 16px; margin-bottom: 10px; }
+.srclist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; } .srclist li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 14px; } .srclist .srcb { color: var(--cy); border-color: rgba(53, 212, 244, .4); background: var(--cy-bg); }
+.labcard h3, .seriescard h3 { margin-bottom: 2px; } .tl-link { color: var(--cy); font-weight: 600; font-size: 14px; margin-top: 6px; display: inline-block; }
+.timeline { list-style: none; margin: 22px 0 0; padding: 0 0 0 26px; position: relative; display: grid; gap: 18px; }
+.timeline::before { content: ''; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 2px; background: linear-gradient(180deg, var(--cy), var(--line2) 70%); border-radius: 2px; }
+.tl-node { position: relative; } .tl-dot { position: absolute; left: -26px; top: 18px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); border: 3px solid var(--line2); }
+.tl-node.latest .tl-dot, .famline .cur .tl-dot { border-color: var(--cy); background: var(--cy); box-shadow: 0 0 0 5px rgba(53, 212, 244, .18); }
+.tl-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; } .tl-node.latest .tl-card { border-color: rgba(53, 212, 244, .4); }
+.tl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; } .tl-head h3 { font-size: 17px; } .tl-date { color: var(--mut); font-size: 13px; margin-left: auto; }
+.tl-badge { background: var(--cy); color: #031018; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; border-radius: 999px; padding: 2px 9px; }
+.tl-models { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; } .tl-models li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.tl-models a { font-weight: 600; color: var(--ink); } .tl-models a:hover { color: var(--cy); }
+.tl-chip { font-size: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 8px; color: var(--mut); } .tl-sub { font-size: 12.5px; color: var(--dim); }
+.famcard { display: grid; gap: 14px; }
+.famline { list-style: none; margin: 0; padding: 0 0 0 24px; position: relative; display: grid; gap: 10px; }
+.famline::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: var(--line2); }
+.famline li { position: relative; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; } .famline .tl-dot { left: -24px; top: 4px; width: 14px; height: 14px; border-width: 2.5px; } .famline .cur b { color: var(--cy); }
+@media (prefers-reduced-motion: no-preference) { .tl-card { transition: border-color .2s, transform .2s; } .tl-card:hover { border-color: rgba(53, 212, 244, .4); transform: translateX(3px); } }
+@media (max-width: 860px) { .labhero h1 { font-size: 25px; } .tl-date { margin-left: 0; width: 100%; } .labact > * { flex: 1; } }
+
+/* ---- Watching (Now page) ---- */
+.watching { background: linear-gradient(180deg, rgba(53, 212, 244, .06), transparent), var(--panel); border: 1px solid rgba(53, 212, 244, .25); border-radius: 14px; padding: 16px 18px; display: grid; gap: 12px; }
+.watching h2 { font-size: 17px; margin: 0; } .watching .why-here { font-size: 12.5px; color: var(--cy); }
+.watch-chips { display: flex; flex-wrap: wrap; gap: 8px; } .watch-chips a { font-size: 13px; padding: 3px 11px; border-radius: 999px; border: 1px solid var(--line2); color: var(--ink); } .watch-chips a:hover { border-color: var(--cy2); color: var(--cy); text-decoration: none; }
+.sig-row .because { font-size: 12px; color: var(--cy); }
+.phead-sm { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+
+/* ---- Compare ---- */
+.cmp { margin-top: 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.cmp-t { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 560px; }
+.cmp-t th, .cmp-t td { padding: 11px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+.cmp-t thead th { background: var(--panel2); position: sticky; top: 0; }
+.cmp-t tbody th[scope=row] { color: var(--mut); font-weight: 500; width: 190px; min-width: 150px; position: sticky; left: 0; background: var(--panel); z-index: 1; }
+.cmp-sec th { background: rgba(53, 212, 244, .06); color: var(--cy); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; padding: 8px 14px; }
+.cmp-head { display: grid; gap: 6px; justify-items: start; } .cmp-head a { font-family: var(--display); font-weight: 600; font-size: 16px; color: var(--ink); overflow-wrap: anywhere; } .cmp-head a:hover { color: var(--cy); }
+.cmp-head .score { width: 40px; height: 40px; } .cmp-head .score b { font-size: 14px; }
+.cmp-sub { display: block; font-size: 12px; color: var(--dim); }
+.cmp-t td.best { background: var(--cy-bg); box-shadow: inset 3px 0 0 var(--cy); font-weight: 600; }
+.cmp-why { margin: 0; padding-left: 18px; color: var(--mut); font-size: 13.5px; }
+.cmp-t.only-diff .cmp-same { display: none; }
+@media (max-width: 860px) { .cmp-t tbody th[scope=row] { width: 120px; min-width: 110px; font-size: 13px; } .cmp-t th, .cmp-t td { padding: 10px; font-size: 14px; } }
