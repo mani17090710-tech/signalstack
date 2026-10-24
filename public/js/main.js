@@ -1,5 +1,5 @@
 // App shell: top bar, bottom navigation on phones, hash router, and the data every page shares.
-import { $, $$, api, html, raw, mount, state, failed, skeleton } from './lib.js';
+import { $, $$, api, html, raw, mount, state, failed, skeleton, ago } from './lib.js';
 import { openAuth } from './auth.js';
 import { showIntro, introSeen } from './intro.js';
 import * as motion from './motion.js';
@@ -105,13 +105,23 @@ async function pollAlerts() {
 
 export async function boot() {
   state.me = null; state.watch = [];
-  try { state.status = await api('/status'); } catch (e) { /* page will show its own error */ }
-  try { state.me = await api('/me'); state.watch = await api('/watchlist'); } catch (e) { /* guest */ }
   if (!$('#main')) shell(); else drawAcct();
+  // Everything starts at once instead of one request after another: the page, who is logged in, and the site counts.
+  const who = (async () => { try { state.me = await api('/me'); state.watch = await api('/watchlist'); } catch (e) { /* guest */ } })()
+    .then(() => { drawAcct(); $$('[data-watch]').forEach(b => { if (state.watch.includes(b.dataset.watch)) b.textContent = 'Watching'; }); });
+  const stat = api('/status').then(s => { state.status = s; }).catch(() => { /* the page shows its own error */ });
+  // Only pages that need to know who you are (or the site counts) wait for those; public pages never do.
+  if ([...PRIVATE, 'you'].includes((location.hash.replace(/^#\/?/, '') || 'now').split('/')[0])) await Promise.all([who, stat]);
   await route();
 }
 shell(); boot();
 setInterval(pollAlerts, 60000);
+// Keep every "5 min ago" on screen honest without reloading: refresh them once a minute. A "Last updated" older than an hour turns amber.
+setInterval(() => $$('[data-ts]').forEach(el => {
+  const ts = el.dataset.ts; if (!ts) return;
+  el.textContent = ago(ts);
+  const u = el.closest('.upd'); if (u) u.classList.toggle('stale', Date.now() - Date.parse(ts.replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z')) > 36e5);
+}), 60000);
 // Play the intro when someone arrives at the front door (no link to a specific page), once per visit.
 if (!introSeen() && ['', 'now'].includes(location.hash.replace(/^#\/?/, ''))) showIntro(go);
 initPreview();

@@ -1,0 +1,59 @@
+/* Signal cards, loading and empty states, and the "Last updated" pill. Colour here carries meaning: each source has one colour, used on the badge and the card's left edge. */
+.src-hf { --sc: #ffb454; } .src-or { --sc: #a78bfa; } .src-off { --sc: #3ddc97; } .src-arx { --sc: #ff7a7a; } .src-gh { --sc: #c9d4ea; } .src-blog { --sc: #5b9dff; } .src-other { --sc: #8d9dbd; }
+
+.stack { gap: 14px; }
+.sig { background: linear-gradient(180deg, var(--panel), #091122); border: 1px solid var(--line); border-left: 3px solid var(--sc, var(--line2)); border-radius: 12px; padding: 18px 20px 16px; display: grid; gap: 11px; min-width: 0; }
+.sc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.sc-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; padding-top: 2px; }
+.sc-type { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--ink); }
+.sc-type svg { width: 15px; height: 15px; color: var(--sc); }
+.srcb { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; color: var(--sc); border: 1px solid color-mix(in srgb, var(--sc) 45%, transparent); background: color-mix(in srgb, var(--sc) 12%, transparent); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.sc-time { font-size: 13px; color: var(--mut); white-space: nowrap; } .sc-time::before { content: '·'; margin-right: 10px; color: var(--dim); }
+.sig .score { width: 46px; height: 46px; border-width: 3px; } .sig .score b { font-size: 15px; }
+.sig h3 { font-family: var(--display); font-weight: 600; font-size: 18px; line-height: 1.35; letter-spacing: -.005em; overflow-wrap: anywhere; margin: 0; }
+.sig h3 a { color: var(--ink); } .sig h3 a:hover { color: var(--cy); text-decoration: none; }
+.sc-sum { margin: 0; color: var(--mut); font-size: 14.5px; line-height: 1.6; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 75ch; }
+.sc-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sc-act { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 2px; }
+.btn-src, .btn-sec { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border-radius: 9px; font-weight: 600; font-size: 14px; text-decoration: none; }
+.btn-src { background: var(--cy); color: #031018; border: 1px solid var(--cy); } .btn-src:hover { text-decoration: none; filter: brightness(1.08); }
+.btn-src.off { background: transparent; color: var(--dim); border-color: var(--line2); font-weight: 500; cursor: default; filter: none; }
+.btn-sec { color: var(--ink); border: 1px solid var(--line2); background: transparent; } .btn-sec:hover { text-decoration: none; border-color: var(--cy2); color: var(--cy); }
+.sig .why { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 2px; }
+
+/* Last updated */
+.upd { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--mut); padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); white-space: nowrap; }
+.upd b { font-weight: 600; color: var(--ink); }
+.upd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 rgba(61, 220, 151, .5); }
+.upd.stale .upd-dot { background: var(--warn); box-shadow: none; }
+
+/* Loading: cards the same shape as real ones, then an honest note if it takes a while */
+.skel { display: grid; gap: 14px; } .sk-list { display: grid; gap: 14px; }
+.sk { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line2); border-radius: 12px; padding: 18px 20px; display: grid; grid-template-columns: 1fr auto; gap: 12px 14px; align-items: start; min-height: 128px; }
+.sk > div { grid-row: 1; grid-column: 1; display: grid; gap: 11px; align-content: start; }
+.sk .sk-ring { grid-column: 2; grid-row: 1; width: 46px; height: 46px; border-radius: 50%; }
+.sk i, .sk .sk-ring { display: block; background: linear-gradient(90deg, var(--panel2), var(--line), var(--panel2)); background-size: 200% 100%; animation: sh 1.4s linear infinite; }
+.sk i { height: 12px; border-radius: 6px; } .sk i:nth-child(1) { width: 38%; } .sk i:nth-child(2) { width: 92%; height: 16px; } .sk i:nth-child(3) { width: 64%; }
+.slow { margin: 4px 0 0; text-align: center; color: var(--mut); font-size: 13.5px; opacity: 0; animation: slowin .5s ease 6s forwards; }
+@keyframes slowin { to { opacity: 1; } }
+
+/* Empty and error states */
+.empty { padding: 44px 22px; gap: 10px; border-radius: 14px; background: radial-gradient(120% 100% at 50% 0, rgba(53, 212, 244, .06), transparent 60%), var(--panel); }
+.empty-ico { width: 44px; height: 44px; margin: 0 auto 2px; color: var(--cy2); } .empty.err .empty-ico { color: var(--bad); }
+.empty-act { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .upd-dot { animation: upd 2.4s ease-out infinite; } @keyframes upd { 70%, 100% { box-shadow: 0 0 0 7px rgba(61, 220, 151, 0); } }
+  .upd.stale .upd-dot { animation: none; }
+}
+@media (prefers-reduced-motion: reduce) { .sk i, .sk .sk-ring { animation: none; } .slow { animation-duration: .01s; } }
+
+@media (max-width: 860px) {
+  .sig { padding: 16px 15px 14px; gap: 10px; border-radius: 11px; }
+  .sig h3 { font-size: 16.5px; }
+  .sc-sum { font-size: 14px; -webkit-line-clamp: 3; }
+  .sc-time::before { display: none; }
+  .sc-act { display: grid; grid-template-columns: 1fr; gap: 8px; } .btn-src, .btn-sec { width: 100%; min-height: 44px; }
+  .sk { padding: 16px 15px; }
+  .phead { align-items: flex-start; }
+}
