@@ -4,7 +4,7 @@
 import { api, html, mount, num, day, isApi, ctxLabel, safeUrl, host, verBadge, scoreRing, dateLabel, mid, shortName } from './lib.js';
 import { plainLine } from './views/explain.js';
 
-const TRIGGER = '.sig h3 a[href^="#model/"], .mcard .mc-name';
+const TRIGGER = '.sig h3 a[href^="#model/"], .sig-row h3 a[href^="#model/"], .mcard .mc-name';
 const cache = new Map();
 let pv, openFor = null, tOpen, tClose, seq = 0;
 

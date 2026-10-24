@@ -4,6 +4,7 @@ import { openAuth } from './auth.js';
 import { showIntro, introSeen } from './intro.js';
 import * as motion from './motion.js';
 import { initPreview } from './preview.js';
+import { initSuggest } from './suggest.js';
 import * as home from './views/home.js';
 import * as signals from './views/signals.js';
 import * as models from './views/models.js';
@@ -27,7 +28,7 @@ const VIEWS = {
   search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], compare: [extras.compare, 'you'],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
-const NAV = [['now', 'Home'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
+const NAV = [['now', 'Now'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
 const PRIVATE = ['watchlist', 'alerts', 'admin'];
 
 function shell() {
@@ -39,10 +40,10 @@ function shell() {
     </header>
     <main id="main" tabindex="-1"></main>
     <nav class="bottom" aria-label="Main">${NAV.map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${rawSvg(k)}<span>${l}</span></a>`)}</nav>`);
-  let t; const sq = $('#sq');
-  // Debounced: search only after the person pauses typing.
-  sq.oninput = () => { clearTimeout(t); t = setTimeout(() => { const v = sq.value.trim(); if (v.length >= 2) location.hash = 'search/' + encodeURIComponent(v); }, 350); };
-  $('#sf').onsubmit = e => { e.preventDefault(); clearTimeout(t); const v = sq.value.trim(); if (v.length >= 2) location.hash = 'search/' + encodeURIComponent(v); };
+  const sq = $('#sq');
+  // Typing shows quick suggestions (suggest.js); Enter opens the full results page. Typing never moves the person off the page they are on.
+  initSuggest(sq, $('#sf'));
+  $('#sf').onsubmit = e => { e.preventDefault(); const v = sq.value.trim(); if (v.length >= 2) location.hash = 'search/' + encodeURIComponent(v); };
   drawAcct();
 }
 function drawAcct() {

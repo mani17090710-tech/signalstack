@@ -10,7 +10,7 @@ const { resolveId } = require('./lib/canon');
 const resets = require('./lib/reset');
 const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
-const { scoreSignal, SIGNIFICANT, WEIGHTS } = require('./lib/score');
+const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
 
@@ -24,7 +24,8 @@ const LEGAL_VERSION = process.env.LEGAL_VERSION || '2026-10-06';
 const hashPw = (pw, salt = cr.randomBytes(16).toString('hex')) => salt + ':' + cr.scryptSync(pw, salt, 64).toString('hex');
 const checkPw = (pw, h) => { const [s, k] = h.split(':'); return cr.timingSafeEqual(Buffer.from(k, 'hex'), cr.scryptSync(pw, s, 64)); };
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const likeOf = t => '%' + String(t).replace(/[\\%_]/g, '\\$&') + '%';
+// Words are matched in order with anything between them, so "qwen coder" finds Qwen3-Coder-27B and "meta wonder" finds meta/muse-wonder.
+const likeOf = t => '%' + String(t).trim().split(/\s+/).slice(0, 6).map(w => w.replace(/[\\%_]/g, '\\$&')).join('%') + '%';
 const pageOf = q => ({ limit: Math.min(Math.max(+q.get('limit') || 50, 1), 200), offset: Math.max(+q.get('offset') || 0, 0) });
 
 // Per-IP rate limits: a tight one for auth, a loose one for everything else under /api.
@@ -139,7 +140,7 @@ function signals(q) {
   const win = WINDOWS[q.get('window')] || WINDOWS['24h'];
   let where = ` and e.ts >= datetime('now','${win}')`; const args = [];
   const cat = q.get('cat'), co = q.get('company'), ver = q.get('verification');
-  if (cat) { where += ' and e.cat=?'; args.push(cat); }
+  if (cat) { const cs = cat.split(',').slice(0, 4); where += ' and e.cat in (' + cs.map(() => '?').join(',') + ')'; args.push(...cs); }
   if (co) { where += ' and e.company_id=?'; args.push(co); }
   if (ver) { where += ' and e.verification=?'; args.push(ver); }
   let items = signalRows(where, args, 600).map(signalOut);
@@ -188,17 +189,30 @@ get(/^\/api\/status$/, () => {
   };
 });
 
-// Home: what matters right now.
+// Home: what matters right now. Ranking is importance plus recency: the Signal Score (importance) is faded as an item ages, so a fresh 75
+// outranks a day-old 85. Each model or source appears once, and items are grouped so the page reads like a short briefing.
+const NOW_GROUPS = [['models', 'Models', ['Model Release', 'Trending'], 5], ['papers', 'Papers', ['Research'], 4], ['labs', 'Lab updates and releases', ['Announcement', 'Open Source'], 4]];
+const rankOf = s => { const t = parseTs(s.ts), ageH = isNaN(t) ? 48 : Math.max(0, (Date.now() - t) / 36e5); return Math.round(s.score * (0.6 + 0.4 * Math.exp(-ageH / 18))); };
+function ranked(list) {
+  const seen = new Set(), out = [];
+  for (const s of list.map(x => ({ ...x, rank: rankOf(x) })).sort((a, b) => b.rank - a.rank || (a.ts < b.ts ? 1 : -1))) {
+    const key = s.model_id || s.url || 'e' + s.id; if (seen.has(key)) continue; seen.add(key); out.push(s);
+  }
+  return out;
+}
 get(/^\/api\/now$/, () => {
   const day = signals(new URLSearchParams('window=24h')), week = signals(new URLSearchParams('window=7d'));
   const pool = day.length >= 5 ? day : week;
-  const top = [...pool].sort((a, b) => b.score - a.score).slice(0, 6);
-  const newModels = db.prepare(M_SELECT + " where m.verified=1 and m.company_id is not null order by coalesce(m.released_at,m.rel) desc limit 8").all().map(modelOut);
+  const groups = NOW_GROUPS.map(([id, label, cats, n]) => {
+    const inDay = ranked(day.filter(s => cats.includes(s.cat))), use = inDay.length >= 3 ? inDay : ranked(week.filter(s => cats.includes(s.cat)));
+    return { id, label, cats, window: use === inDay ? '24h' : '7d', total: use.length, items: use.slice(0, n) };
+  });
+  // The lead story is the best-ranked item across the groups, and is not repeated inside its group.
+  const best = groups.flatMap(g => g.items.map(i => [g, i])).sort((a, b) => b[1].rank - a[1].rank)[0];
+  const lead = best ? best[1] : null; if (best) best[0].items = best[0].items.filter(i => i !== lead);
   const trending = db.prepare(M_SELECT + " where m.verified=1 and m.trend_rank is not null and m.trend_at>=datetime('now','-2 day') order by m.trend_rank limit 8").all().map(modelOut);
-  const papers = db.prepare("select id,title,authors,published_at,date,url,entities,verification,retrieved_at,arxiv_id,last_checked from papers where verified=1 order by coalesce(published_at,date) desc limit 6").all()
-    .map(p => ({ ...p, entities: parseJson(p.entities, []), verification_label: VER_LABEL[p.verification] || VER_LABEL.source_verified }));
   return {
-    top, newModels, trending, papers, lastChecked: lastChecked(),
+    lead, groups: groups.filter(g => g.items.length || g.total), top: ranked(pool).slice(0, 6), trending, lastChecked: lastChecked(),
     counts: { last24h: day.length, significant: day.filter(s => s.score >= SIGNIFICANT).length, models: db.prepare('select count(*) c from models where verified=1').get().c, papers: db.prepare('select count(*) c from papers where verified=1').get().c },
     usedWindow: pool === day ? '24h' : '7d',
   };
@@ -333,12 +347,12 @@ const paperOut = (x, full) => ({
 });
 get(/^\/api\/papers$/, ({ q }) => {
   const t = (q.get('q') || '').trim(), { limit, offset } = pageOf(q), co = q.get('company');
-  const w = " where p.verified=1 and (?1 is null or p.title like ?1 escape '\\' or coalesce(p.abstract,p.tldr) like ?1 escape '\\' or p.authors like ?1 escape '\\' or p.arxiv_id like ?1 escape '\\') and (?2 is null or p.entities like ?2) and (?3 is null or ','||coalesce(p.categories,p.arch,'')||',' like ?3)";
-  const cat = (q.get('category') || '').replace(/[^\w.-]/g, '');
-  const a = [t ? likeOf(t) : null, co ? '%"' + co + '"%' : null, cat ? '%,' + cat + ',%' : null];
+  const w = " where p.verified=1 and (?1 is null or p.title like ?1 escape '\\' or coalesce(p.abstract,p.tldr) like ?1 escape '\\' or p.authors like ?1 escape '\\' or p.arxiv_id like ?1 escape '\\') and (?2 is null or p.entities like ?2) and (?3 is null or ','||coalesce(p.categories,p.arch,'')||',' like ?3) and (?4 is null or substr(coalesce(p.published_at,p.date),1,10) >= ?4)";
+  const cat = (q.get('category') || '').replace(/[^\w.-]/g, ''), days = Math.min(Math.max(+q.get('days') || 0, 0), 3650);
+  const a = [t ? likeOf(t) : null, co ? '%"' + co + '"%' : null, cat ? '%,' + cat + ',%' : null, days ? new Date(Date.now() - days * 864e5).toISOString().slice(0, 10) : null];
   return {
-    total: db.prepare('select count(*) c from papers p' + w).get(...a).c,
-    items: db.prepare('select p.* from papers p' + w + ' order by coalesce(p.published_at,p.date) desc limit ?4 offset ?5').all(...a, limit, offset).map(x => paperOut(x, true)),
+    total: db.prepare('select count(*) c from papers p' + w).get(...a).c, lastChecked: db.prepare("select max(coalesce(last_checked,retrieved_at)) t from papers where verified=1").get().t || lastChecked(),
+    items: db.prepare('select p.* from papers p' + w + ' order by coalesce(p.published_at,p.date) desc limit ?5 offset ?6').all(...a, limit, offset).map(x => paperOut(x, true)),
   };
 });
 get(/^\/api\/papers\/(.+)$/, ({ m }) => {
@@ -360,16 +374,19 @@ get(/^\/api\/docs\/diff$/, ({ q }) => {
 });
 // Search: results grouped by type so the page can show Models, Companies, Papers, Signals and Benchmarks separately.
 get(/^\/api\/search$/, ({ q }) => {
-  const t = (q.get('q') || '').trim(); if (t.length < 2) return {};
-  const l = likeOf(t), lc = t.toLowerCase();
+  const t = (q.get('q') || '').trim().slice(0, 100); if (t.length < 2) return {};
+  const lc = t.toLowerCase(), toks = lc.split(/\s+/).filter(Boolean).slice(0, 6);
+  // Every word must appear somewhere in the record, in any order ("wonder meta" finds meta/muse-wonder).
+  const all = cols => ({ sql: toks.map(() => '(' + cols.map(c => `${c} like ? escape '\\'`).join(' or ') + ')').join(' and '), args: toks.flatMap(w => cols.map(() => likeOf(w))) });
   // Every result says what kind of thing it is (type) and how it is sourced (verification), so nothing looks more certain than it is.
   const tag = (type, list) => list.map(x => ({ type, ...x }));
+  const mw = all(['m.name', 'm.creator', 'm.pipeline', 'm.provider_model_id', 'm.model_ref']), pw = all(['title', 'authors', 'arxiv_id']), ew = all(['e.summary', 'e.title']);
   return {
-    models: tag('model', db.prepare("select * from models m where m.verified=1 and (m.name like ?1 escape '\\' or m.creator like ?1 escape '\\' or m.pipeline like ?1 escape '\\' or m.provider_model_id like ?1 escape '\\' or m.model_ref like ?1 escape '\\') order by (m.verification='verified') desc, (m.company_id is not null) desc, m.likes desc limit 8").all(l).map(modelOut)),
-    companies: tag('company', COMPANIES.filter(c => c.name.toLowerCase().includes(lc) || c.id.includes(lc)).map(c => ({ id: c.id, name: c.name, site: c.site, official: c.hf.length > 0 || c.gh.length > 0, verification: 'source_verified', verification_label: 'Reference list', models: db.prepare('select count(*) c from models where company_id=? and verified=1').get(c.id).c }))),
-    papers: tag('paper', db.prepare("select * from papers where verified=1 and (title like ?1 escape '\\' or authors like ?1 escape '\\' or arxiv_id like ?1 escape '\\') order by coalesce(published_at,date) desc limit 6").all(l).map(x => paperOut(x, false))),
-    signals: tag('signal', db.prepare(`select e.id,e.ts,e.cat,coalesce(e.title,e.summary) title,e.source url,e.verification,e.source_type from events e where ${EV_OK} and (e.summary like ?1 escape '\\' or e.title like ?1 escape '\\') order by e.ts desc limit 6`).all(l).map(x => ({ ...x, verification_label: VER_LABEL[x.verification] || VER_LABEL.aggregator_listed }))),
-    benchmarks: tag('benchmark', db.prepare("select id,name,ver from benchmarks where name like ?1 escape '\\' or cat like ?1 escape '\\' limit 6").all(l)),
+    models: tag('model', db.prepare(`select * from models m where m.verified=1 and ${mw.sql} order by (lower(m.name)=?) desc, (lower(m.name) like ? escape '\\') desc, (m.verification='verified') desc, (m.company_id is not null) desc, m.likes desc limit 8`).all(...mw.args, lc, likeOf(lc).slice(1)).map(modelOut)),
+    companies: tag('company', COMPANIES.filter(c => toks.every(w => (c.name + ' ' + c.id).toLowerCase().includes(w))).map(c => ({ id: c.id, name: c.name, site: c.site, official: c.hf.length > 0 || c.gh.length > 0, verification: 'source_verified', verification_label: 'Reference list', models: db.prepare('select count(*) c from models where company_id=? and verified=1').get(c.id).c }))),
+    papers: tag('paper', db.prepare(`select * from papers where verified=1 and ${pw.sql} order by coalesce(published_at,date) desc limit 6`).all(...pw.args).map(x => paperOut(x, false))),
+    signals: tag('signal', db.prepare(`select e.id,e.ts,e.cat,coalesce(e.title,e.summary) title,e.source url,e.verification,e.source_type,e.model_id from events e where ${EV_OK} and ${ew.sql} order by e.ts desc limit 6`).all(...ew.args).map(x => ({ ...x, verification_label: VER_LABEL[x.verification] || VER_LABEL.aggregator_listed }))),
+    benchmarks: tag('benchmark', db.prepare("select id,name,ver from benchmarks where name like ?1 escape '\\' or cat like ?1 escape '\\' limit 6").all(likeOf(t))),
   };
 });
 

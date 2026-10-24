@@ -1,20 +1,24 @@
 // Live Signals: everything new, with time-window, type, lab and verification filters.
 // The page draws at once. The list and the lab filter load in parallel, so a slow response never leaves a blank screen.
-import { api, html, pageHead, signalCard, empty, checked, verLegend, skeleton, mount, $, SIGNAL_LABEL, VER } from '../lib.js';
+import { api, html, pageHead, signalCard, empty, checked, verLegend, skeleton, mount, $, VER } from '../lib.js';
 
 const WINDOWS = [['1h', 'Last hour'], ['6h', '6 hours'], ['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']];
 const f = { window: '24h', cat: '', company: '', verification: '', sort: 'time' };
 let shown = 0;
+// Types shown in the filter. A value can name several categories (comma-separated), which is how the Now page links to "all models" or "all lab updates".
+const TYPES = [['Model Release,Trending', 'Models'], ['Research', 'Papers'], ['Announcement,Open Source', 'Lab updates (blogs and releases)'], ['Open Source', 'Software releases only'], ['Announcement', 'Blog posts only']];
 const filtered = () => !!(f.cat || f.company || f.verification);
 
-export async function render() {
+export async function render(arg = '') {
+  // A link from Now can preselect filters, for example #signals/cat=Research&window=7d
+  if (arg) { const a = new URLSearchParams(arg); f.cat = a.get('cat') || ''; f.company = a.get('company') || ''; f.verification = ''; if (WINDOWS.some(([k]) => k === a.get('window'))) f.window = a.get('window'); }
   return {
-    title: 'Live Signals',
-    html: html`${pageHead('Live Signals', 'New models, research and releases as they are detected. Each card links to its original source.', html`<span id="chk"><span class="upd"><i class="upd-dot" aria-hidden="true"></i>Checking…</span></span>`)}
+    title: 'All signals',
+    html: html`${pageHead('All signals', html`The full feed: every new model, paper and release as it is detected, newest first. Each card links to its original source. Want just the highlights? <a href="#now">See Now</a>.`, html`<span id="chk"><span class="upd"><i class="upd-dot" aria-hidden="true"></i>Checking…</span></span>`)}
       ${verLegend()}
       <div class="toolbar"><div class="seg" role="group" aria-label="Time window">${WINDOWS.map(([k, l]) => html`<button data-win="${k}" class="${f.window === k ? 'on' : ''}">${l}</button>`)}</div></div>
       <div class="toolbar">
-        <select id="fc" aria-label="Type"><option value="">All types</option>${Object.entries(SIGNAL_LABEL).map(([k, l]) => html`<option value="${k}" ${f.cat === k ? 'selected' : ''}>${l}</option>`)}</select>
+        <select id="fc" aria-label="Type"><option value="">All types</option>${TYPES.map(([k, l]) => html`<option value="${k}" ${f.cat === k ? 'selected' : ''}>${l}</option>`)}</select>
         <select id="fco" aria-label="Lab"><option value="">All labs</option></select>
         <select id="fv" aria-label="Verification"><option value="">Any verification</option>${Object.entries(VER).map(([v, x]) => html`<option value="${v}" ${f.verification === v ? 'selected' : ''}>${x[1]}</option>`)}</select>
         <select id="fs" aria-label="Sort"><option value="time">Newest first</option><option value="score" ${f.sort === 'score' ? 'selected' : ''}>Highest score</option></select></div>

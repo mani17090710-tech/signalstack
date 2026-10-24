@@ -57,3 +57,53 @@
   .sk { padding: 16px 15px; }
   .phead { align-items: flex-start; }
 }
+
+/* ---- Now page ---- */
+.guide { margin: 6px 0 0; color: var(--mut); font-size: 14px; } .guide b { color: var(--ink); }
+.cnt { font-family: var(--font); font-size: 12px; font-weight: 600; color: var(--mut); background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; vertical-align: middle; margin-left: 6px; }
+.sig-lead { padding: 22px 24px 20px; gap: 13px; background: radial-gradient(120% 140% at 0 0, color-mix(in srgb, var(--sc, var(--cy)) 14%, transparent), transparent 55%), linear-gradient(180deg, var(--panel), #091122); box-shadow: 0 18px 50px -30px color-mix(in srgb, var(--sc, var(--cy)) 70%, transparent); }
+.sig-lead h3 { font-size: 24px; line-height: 1.28; } .sig-lead .sc-sum { font-size: 15.5px; -webkit-line-clamp: 4; }
+.sig-lead .score { width: 56px; height: 56px; } .sig-lead .score b { font-size: 18px; }
+
+.rows-sig { display: grid; gap: 8px; }
+.sig-row { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--sc, var(--line2)); border-radius: 11px; padding: 11px 14px; min-width: 0; }
+.sig-row .score { width: 40px; height: 40px; border-width: 2.5px; } .sig-row .score b { font-size: 13.5px; }
+.sr-main { min-width: 0; display: grid; gap: 4px; }
+.sig-row h3 { font-size: 15.5px; font-weight: 600; line-height: 1.35; margin: 0; overflow-wrap: anywhere; } .sig-row h3 a { color: var(--ink); } .sig-row h3 a:hover { color: var(--cy); text-decoration: none; }
+.sr-meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; color: var(--mut); }
+.sr-meta .sc-type { font-size: 11px; } .sr-meta .srcb { font-size: 11.5px; padding: 1px 8px; }
+.sr-co { color: var(--mut); } .sr-co::before { content: '·'; margin-right: 10px; color: var(--dim); } .sr-co:hover { color: var(--cy); text-decoration: none; }
+.sr-go { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 9px; border: 1px solid var(--line2); color: var(--ink); font-size: 17px; } .sr-go:hover { text-decoration: none; border-color: var(--cy2); color: var(--cy); background: var(--cy-bg); }
+.rankinfo { margin-top: 26px; } .rankinfo p { color: var(--mut); font-size: 14px; max-width: 70ch; }
+@media (prefers-reduced-motion: no-preference) { .sig-row { transition: border-color .2s, background .2s, transform .2s cubic-bezier(.2, .8, .2, 1); } .sig-row:hover { transform: translateX(3px); border-color: rgba(53, 212, 244, .4); background: var(--panel2); } }
+@media (max-width: 860px) {
+  .sig-lead { padding: 17px 16px 15px; } .sig-lead h3 { font-size: 20px; }
+  .sig-row { gap: 11px; padding: 10px 11px; } .sig-row .score { width: 36px; height: 36px; } .sr-go { width: 36px; height: 36px; }
+}
+
+/* ---- Models / Research toolbars ---- */
+.tb-main { flex-wrap: nowrap; } .tb-main input[type=search] { flex: 1; min-width: 0; }
+.ftog { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; } .ftog[aria-expanded="true"] { border-color: var(--cy2); color: var(--cy); }
+.fcount { background: var(--cy); color: #031018; border-radius: 999px; font-size: 12px; font-weight: 700; min-width: 20px; padding: 0 6px; text-align: center; }
+.fpanel { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; align-items: end; }
+.fpanel[hidden] { display: none; }
+.fpanel label { display: grid; gap: 5px; font-size: 12.5px; color: var(--mut); font-weight: 500; } .fpanel select { width: 100%; }
+.fpanel .chk { align-self: center; grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; } .chips:empty { display: none; }
+.chip { min-height: 30px; padding: 3px 11px; border-radius: 999px; font-size: 13px; background: var(--cy-bg); border-color: rgba(53, 212, 244, .35); color: var(--cy); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.more { text-align: center; margin-top: 18px; }
+@media (max-width: 860px) { .tb-main { flex-wrap: wrap; } .tb-main select { flex: 1; } .seg { overflow-x: auto; flex-wrap: nowrap; max-width: 100%; } .seg button { white-space: nowrap; } }
+
+/* ---- Search suggestions ---- */
+.sg { position: absolute; z-index: 70; top: calc(100% + 8px); right: 0; width: min(440px, 92vw); max-height: min(70vh, 520px); overflow-y: auto; background: #0d1730; border: 1px solid var(--line2); border-radius: 14px; padding: 8px; box-shadow: 0 22px 60px rgba(0, 0, 0, .6); }
+.sg[hidden] { display: none; }
+.sg-h { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); padding: 8px 10px 4px; }
+.sg-item, .sg-all { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; padding: 8px 10px; border-radius: 9px; color: var(--ink); text-decoration: none; }
+.sg-item:hover, .sg-item.on, .sg-all:hover, .sg-all.on { background: var(--cy-bg); text-decoration: none; }
+.sg-kind { grid-row: 1 / span 2; align-self: center; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--cy); background: var(--cy-bg); border-radius: 6px; padding: 3px 7px; min-width: 52px; text-align: center; }
+.sg-t { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .sg-s { font-size: 12.5px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-all { display: block; margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 9px 9px; padding-top: 11px; color: var(--cy); font-weight: 600; font-size: 14px; }
+.sg-none { margin: 0; padding: 12px 10px; color: var(--mut); font-size: 14px; }
+.res-ico { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line2); color: var(--sc, var(--mut)); font-size: 18px; }
+@media (max-width: 860px) { .sg { position: fixed; top: calc(var(--top-h) + 6px); left: 10px; right: 10px; width: auto; max-height: 60vh; } }
