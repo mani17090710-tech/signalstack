@@ -59,6 +59,21 @@ test('model detail, company and grouped search', async () => {
   assert.ok(s.models.every(x => x.type === 'model' && x.verification_label), 'search results say what they are and how they are sourced');
   assert.ok(s.companies.every(x => x.type === 'company'));
 });
+test('now is a ranked, grouped briefing and search matches words in any order', async () => {
+  const now = (await api('/api/now')).body;
+  assert.ok(Array.isArray(now.groups) && now.groups.every(g => g.items.length <= 5 && ['models', 'papers', 'labs'].includes(g.id)));
+  assert.ok(now.lead && now.lead.rank >= 0 && !now.groups.some(g => g.items.some(i => i.id === now.lead.id)), 'the lead story is not repeated in its group');
+  const ids = now.groups.flatMap(g => g.items.map(i => i.model_id || i.url));
+  assert.strictEqual(new Set(ids).size, ids.length, 'each model or source appears once');
+  for (const g of now.groups) for (let i = 1; i < g.items.length; i++) assert.ok(g.items[i - 1].rank >= g.items[i].rank, 'ranked best first');
+  const fwd = (await api('/api/search?q=' + encodeURIComponent('qwen coder'))).body, rev = (await api('/api/search?q=' + encodeURIComponent('coder qwen'))).body;
+  assert.ok(fwd.models.some(m => m.id === 'hf:Qwen/Qwen3-Coder-27B') && rev.models.some(m => m.id === 'hf:Qwen/Qwen3-Coder-27B'), 'word order does not matter');
+  assert.strictEqual((await api('/api/search?q=' + encodeURIComponent('zzzzqqq'))).body.models.length, 0);
+  const sig = (await api('/api/signals?window=30d&cat=' + encodeURIComponent('Model Release,Trending'))).body;
+  assert.ok(sig.items.every(s => ['Model Release', 'Trending'].includes(s.cat)), 'several categories can be asked for at once');
+  assert.ok((await api('/api/papers?days=7')).body.total >= 0);
+});
+
 test('hover preview returns the short version with a score and a source, and 404s unknown models', async () => {
   const d = await api('/api/models/' + encodeURIComponent('hf:Qwen/Qwen3-Coder-27B') + '/preview');
   assert.strictEqual(d.status, 200);

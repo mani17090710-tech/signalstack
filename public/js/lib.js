@@ -103,9 +103,9 @@ export const sourceInfo = s => { const k = SRC[s.source_type]; return [k ? k[0] 
 // Release notes and abstracts can carry markdown; show them as plain sentences.
 const plain = t => String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_>#]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-export const signalCard = s => {
+const card = (s, lead) => {
   const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url), sum = plain(s.detail || (s.summary !== s.title ? s.summary : ''));
-  return html`<article class="sig src-${sk}">
+  return html`<article class="sig src-${sk} ${lead ? 'sig-lead' : ''}">
     <header class="sc-top">
       <div class="sc-chips"><span class="sc-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(TYPE_ICON[type])}</svg>${type}</span><span class="srcb">${sname}</span><time class="sc-time" data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time></div>
       ${scoreRing(s.score)}
@@ -115,6 +115,18 @@ export const signalCard = s => {
     <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}${verBadge(s.verification)}<span class="imp imp-${s.importance}">${s.importance}</span></div>
     <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>` : ''}</div>
     ${scoreBreakdown(s)}</article>`;
+};
+
+export const signalCard = s => card(s, false);
+export const leadCard = s => card(s, true);
+
+// Compact one-line version for lists that are scanned, not read (the groups on Now). Same colour coding, same source button.
+export const signalRow = s => {
+  const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url);
+  return html`<article class="sig-row src-${sk}">${scoreRing(s.score)}
+    <div class="sr-main"><h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
+      <p class="sr-meta"><span class="sc-type">${type}</span><span class="srcb">${sname}</span><time data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time>${s.company ? html`<a class="sr-co" href="#company/${s.company_id}">${s.company}</a>` : ''}</p></div>
+    ${url ? html`<a class="sr-go" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open original source for ${s.title}" title="Open original source">↗</a>` : ''}</article>`;
 };
 
 export const modelCard = m => html`<article class="mcard">
