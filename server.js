@@ -4,7 +4,7 @@ const http = require('http'), fs = require('fs'), path = require('path'), cr = r
 const { openDb } = require('./lib/db');
 const { backup } = require('node:sqlite');
 const os = require('os');
-const { COMPANIES, byId: COMPANY } = require('./lib/companies');
+const { COMPANIES, byId: COMPANY, isOfficialUrl } = require('./lib/companies');
 const { LABEL: VER_LABEL, MEANING: VER_MEANING, STATUSES, evidenceFor } = require('./lib/verify');
 const { resolveId } = require('./lib/canon');
 const resets = require('./lib/reset');
@@ -133,6 +133,8 @@ function signalOut(e) {
     source_type: e.source_type || null, verification: e.verification || 'aggregator_listed', verification_label: VER_LABEL[e.verification] || VER_LABEL.aggregator_listed, retrieved_at: e.retrieved_at || null,
     company_id: e.company_id || null, company: co ? co.name : null, model_id: e.model_id || null, model: e.mname || null,
     score: sc.score, importance: sc.importance, parts: sc.parts, why: sc.why, meta,
+    // True only when the link is on one of the lab's own domains (https), so the page can say "official site" without guessing.
+    official_domain: !!(co && e.source && isOfficialUrl(COMPANY[co.id] || co, e.source)),
   };
 }
 
@@ -213,7 +215,7 @@ get(/^\/api\/now$/, () => {
   const trending = db.prepare(M_SELECT + " where m.verified=1 and m.trend_rank is not null and m.trend_at>=datetime('now','-2 day') order by m.trend_rank limit 8").all().map(modelOut);
   return {
     lead, groups: groups.filter(g => g.items.length || g.total), top: ranked(pool).slice(0, 6), trending, lastChecked: lastChecked(),
-    counts: { last24h: day.length, significant: day.filter(s => s.score >= SIGNIFICANT).length, models: db.prepare('select count(*) c from models where verified=1').get().c, papers: db.prepare('select count(*) c from papers where verified=1').get().c },
+    counts: { last24h: day.length, week: week.length, sources: db.prepare('select count(*) c from sources_config where enabled=1').get().c, significant: day.filter(s => s.score >= SIGNIFICANT).length, models: db.prepare('select count(*) c from models where verified=1').get().c, papers: db.prepare('select count(*) c from papers where verified=1').get().c },
     usedWindow: pool === day ? '24h' : '7d',
   };
 });

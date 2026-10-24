@@ -1,5 +1,5 @@
 // App shell: top bar, bottom navigation on phones, hash router, and the data every page shares.
-import { $, $$, api, html, raw, mount, state, failed, skeleton, ago } from './lib.js';
+import { $, $$, api, html, raw, mount, state, failed, skeleton, ago, trustBar } from './lib.js';
 import { openAuth } from './auth.js';
 import { showIntro, introSeen } from './intro.js';
 import * as motion from './motion.js';
@@ -39,6 +39,7 @@ function shell() {
       <div class="acct" id="acct"></div>
     </header>
     <main id="main" tabindex="-1"></main>
+    <footer class="trust" id="trust" hidden></footer>
     <nav class="bottom" aria-label="Main">${NAV.map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${rawSvg(k)}<span>${l}</span></a>`)}</nav>`);
   const sq = $('#sq');
   // Typing shows quick suggestions (suggest.js); Enter opens the full results page. Typing never moves the person off the page they are on.
@@ -53,12 +54,17 @@ function drawAcct() {
   else { $('#li').onclick = () => openAuth('login', boot); $('#su').onclick = () => openAuth('signup', boot); }
 }
 
+// Footer trust line, from the site status. Hidden until the numbers arrive, and on Now (which shows the same facts at the top).
+function drawTrust() {
+  const st = state.status || {}, f = $('#trust'); if (!f || !st.counts) return;
+  mount(f, html`${trustBar({ week: st.counts.eventsWeek, sources: st.sources && st.sources.total, lastChecked: st.lastUpdate })}<p>Every item links to its original source and says how far that source can be trusted.</p>`); f.hidden = false;
+}
 let seq = 0;
 export async function route() {
   const [r, ...rest] = (location.hash.replace(/^#\/?/, '') || 'now').split('/'), arg = rest.join('/');
   const [view, navKey] = VIEWS[r] || [null, ''];
   $$('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === navKey || a.dataset.nav === r));
-  const main = $('#main'), mine = ++seq;
+  const main = $('#main'), mine = ++seq; document.body.dataset.route = r || 'now';
   if (!view) { mount(main, html`<div class="empty"><h3>Page not found</h3><p>That address doesn’t exist.</p><a href="#now">Go to Home</a></div>`); return; }
   if (PRIVATE.includes(r) && !state.me) { mount(main, you.gate()); return; }
   mount(main, skeleton(4)); scrollTo(0, 0);
@@ -110,13 +116,14 @@ export async function boot() {
   // Everything starts at once instead of one request after another: the page, who is logged in, and the site counts.
   const who = (async () => { try { state.me = await api('/me'); state.watch = await api('/watchlist'); } catch (e) { /* guest */ } })()
     .then(() => { drawAcct(); $$('[data-watch]').forEach(b => { if (state.watch.includes(b.dataset.watch)) b.textContent = 'Watching'; }); });
-  const stat = api('/status').then(s => { state.status = s; }).catch(() => { /* the page shows its own error */ });
+  const stat = api('/status').then(s => { state.status = s; drawTrust(); }).catch(() => { /* the page shows its own error */ });
   // Only pages that need to know who you are (or the site counts) wait for those; public pages never do.
   if ([...PRIVATE, 'you'].includes((location.hash.replace(/^#\/?/, '') || 'now').split('/')[0])) await Promise.all([who, stat]);
   await route();
 }
 shell(); boot();
 setInterval(pollAlerts, 60000);
+setInterval(() => api('/status').then(s => { state.status = s; drawTrust(); }).catch(() => {}), 300000);
 // Keep every "5 min ago" on screen honest without reloading: refresh them once a minute. A "Last updated" older than an hour turns amber.
 setInterval(() => $$('[data-ts]').forEach(el => {
   const ts = el.dataset.ts; if (!ts) return;

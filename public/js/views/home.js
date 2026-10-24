@@ -1,6 +1,6 @@
 // Now: a short daily briefing. One lead story, then the most important items grouped as Models, Papers and Lab updates.
 // Ranking is importance plus recency (see the note at the bottom). Everything links to its original source.
-import { api, html, num, pageHead, leadCard, signalRow, modelCard, empty, checked, verLegend } from '../lib.js';
+import { api, html, num, pageHead, leadCard, signalRow, modelCard, empty, checked, verLegend, trustBar } from '../lib.js';
 
 const SEE_ALL = { models: 'cat=Model Release,Trending', papers: 'cat=Research', labs: 'cat=Announcement,Open Source' };
 const TITLE = { models: ['Models today', 'Models this week'], papers: ['Papers today', 'Papers this week'], labs: ['Lab updates today', 'Lab updates this week'] };
@@ -13,6 +13,7 @@ export async function render() {
     title: 'Now',
     html: html`<div class="hero-now">${pageHead('Today in AI', `The few things that matter right now, from ${win}, most important first.`, checked(d.lastChecked))}
       <p class="snapshot"><span><b>${num(d.counts.last24h)}</b>signals in 24 h</span><span><b>${num(d.counts.significant)}</b>scoring 60 or higher</span><span><b>${num(d.counts.models)}</b>models tracked</span><span><b>${num(d.counts.papers)}</b>paper${d.counts.papers === 1 ? '' : 's'} collected</span></p>
+      ${trustBar({ week: d.counts.week, sources: d.counts.sources, lastChecked: d.lastChecked })}
       <p class="guide"><b>Now</b> is the short briefing. <a href="#signals">Signals</a> is the full feed with filters${d.counts.last24h ? html`, ${num(d.counts.last24h)} in the last day` : ''}.</p></div>
       ${none ? empty('Collecting data', 'The first update starts shortly after the server boots and can take a few minutes. Check back soon.', html`<button class="pri" data-action="reload">Refresh</button>`) : ''}
       ${verLegend()}

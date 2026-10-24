@@ -107,3 +107,20 @@
 .sg-none { margin: 0; padding: 12px 10px; color: var(--mut); font-size: 14px; }
 .res-ico { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line2); color: var(--sc, var(--mut)); font-size: 18px; }
 @media (max-width: 860px) { .sg { position: fixed; top: calc(var(--top-h) + 6px); left: 10px; right: 10px; width: auto; max-height: 60vh; } }
+
+/* ---- Source provenance ---- */
+.prov { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, .02); min-width: 0; }
+.prov svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.prov-t { display: grid; gap: 1px; min-width: 0; } .prov-t b { font-size: 13px; font-weight: 600; } .prov-t a, .prov-t span { font-size: 12.5px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; } .prov-t a:hover { color: var(--cy); }
+.prov-ok { border-color: rgba(61, 220, 151, .35); background: rgba(61, 220, 151, .06); } .prov-ok svg, .prov-ok b { color: var(--ok); }
+.prov-blue { border-color: rgba(53, 212, 244, .3); background: rgba(53, 212, 244, .05); } .prov-blue svg, .prov-blue b { color: var(--cy); }
+.prov-warn { border-color: rgba(242, 184, 75, .35); background: rgba(242, 184, 75, .06); } .prov-warn svg, .prov-warn b { color: var(--warn); }
+.prov-plain svg, .prov-plain b { color: var(--mut); }
+
+/* ---- Trust signals ---- */
+.trust-bar { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13.5px; color: var(--mut); }
+.trust-bar li { display: inline-flex; align-items: center; gap: 7px; } .trust-bar b { color: var(--ink); font-weight: 600; } .trust-bar .upd-dot { display: inline-block; }
+.trust { max-width: 1080px; margin: 10px auto 0; padding: 22px 20px calc(var(--nav-h) + 30px); border-top: 1px solid var(--line); text-align: center; }
+.trust[hidden] { display: none; } .trust .trust-bar { justify-content: center; margin: 0 0 8px; } .trust p { margin: 0; font-size: 13px; color: var(--dim); }
+body[data-route="now"] .trust .trust-bar { display: none; }
+@media (min-width: 861px) { .trust { padding-bottom: 36px; } }
