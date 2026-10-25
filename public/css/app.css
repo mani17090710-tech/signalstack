@@ -259,3 +259,19 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
   #authdlg .code.placed .code__cursor, #authdlg .slot { transition: none; }
   #authdlg .slot.is-land, #authdlg .slot.is-spark .slot__spark rect, #authdlg .code.is-bad, #authdlg .slot:focus-within .slot__digit:empty::after { animation: none; }
 }
+
+/* ---- phones: compact header, expanding search, comfortable tap targets ---- */
+.sbtn, .sclose { display: none; }
+@media (max-width: 860px) {
+  .top { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+  .sform { display: none; }
+  .sbtn { display: inline-grid; place-items: center; width: 44px; height: 44px; margin-left: auto; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 0; }
+  .top.searching .sform { display: flex; flex: 1; gap: 8px; align-items: center; margin: 0; }
+  .top.searching .sform input { min-height: 44px; font-size: 16px; }
+  .top.searching .sclose { display: inline-block; min-height: 44px; background: none; border: 0; color: var(--cy); font-weight: 600; padding: 0 6px; }
+  .top.searching .brand, .top.searching .acct, .top.searching .sbtn { display: none; }
+  .mini, .btn-sec, .btn-src, .save, .seg button, .tags button, select { min-height: 44px; }
+  .seg { scrollbar-width: none; } .seg::-webkit-scrollbar { display: none; }
+  input, select, textarea { font-size: 16px; } /* stops iOS zooming into fields */
+  main { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+}

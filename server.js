@@ -529,6 +529,13 @@ http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'), p = u.pathname, q = u.searchParams;
   const ip = (process.env.TRUST_PROXY === 'true' && String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()) || req.socket.remoteAddress;
   if (p === '/digest/unsubscribe') { if (limited('unsub:' + ip, 30)) { res.writeHead(429); return res.end('Too many requests.'); } return serveUnsubscribe(res, q); }
+  if (p === '/digest/preview') {
+    // The email as it would arrive. It uses inline styles (as email must), so it gets its own policy and may be framed only by this site.
+    const sid = (req.headers.cookie || '').match(/sid=([a-f0-9]+)/)?.[1], ss = sid && db.prepare('select user_id from sessions where token=? and expires>?').get(sid, Date.now());
+    const h = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'" };
+    if (!ss) { res.writeHead(401, h); return res.end('Log in to preview.'); }
+    res.writeHead(200, h); return res.end(digestFor(ss.user_id, q.get('freq') === 'weekly' ? 'weekly' : 'daily').html);
+  }
   if (p === '/feed.xml' || p === '/embed/now') {
     if (limited('api:' + ip, 300)) { res.writeHead(429, { 'Content-Type': 'text/plain' }); return res.end('Too many requests. Wait a minute and try again.'); }
     try { return servePublic(req, res, p, q); } catch (e) { console.error(e); res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end('Something went wrong.'); }

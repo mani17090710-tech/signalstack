@@ -144,7 +144,7 @@ const card = (s, lead) => {
     ${s.matters ? html`<p class="matters"><b>Why this matters</b>${s.matters} <span class="matters-note">Written from the data, not by AI.</span></p>` : ''}
     ${provBlock(s)}
     <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}<span class="imp imp-${s.importance}">${s.importance}</span></div>
-    <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>` : ''}${saveBtn('signal', s.id)}</div>
+    <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>${qlBtn(s.model_id)}` : ''}${saveBtn('signal', s.id)}</div>
     ${scoreBreakdown(s)}</article>`;
 };
 
@@ -152,6 +152,9 @@ export const signalCard = s => card(s, false);
 export const leadCard = s => card(s, true);
 
 // Compact one-line version for lists that are scanned, not read (the groups on Now). Same colour coding, same source button.
+// Touch devices have no hover, so they get a visible button that opens the same preview as a bottom sheet (see preview.js). Hidden with CSS where a mouse exists.
+export const qlBtn = id => html`<button type="button" class="ql" data-ql="${id}">Quick look</button>`;
+
 export const signalRow = s => {
   const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url);
   return html`<article class="sig-row src-${sk}">${scoreRing(s.score)}
@@ -166,7 +169,7 @@ export const modelCard = m => html`<article class="mcard">
   <div class="tags">${m.cats.slice(0, 3).map(c => html`<span class="tag">${CAT_LABEL[c] || c}</span>`)}${m.pipeline && !m.cats.length ? html`<span class="tag">${m.pipeline}</span>` : ''}${verBadge(m.verification)}</div>
   <dl class="facts">${isApi(m) ? html`<div><dt>Context</dt><dd>${ctxLabel(m.context_length) || NA}</dd></div><div><dt>Input price</dt><dd>${m.price_in == null ? NA : '$' + m.price_in + ' / 1M'}</dd></div><div><dt>Output price</dt><dd>${m.price_out == null ? NA : '$' + m.price_out + ' / 1M'}</dd></div><div><dt>${dateLabel(m)}</dt><dd>${day(m.released_at)}</dd></div>`
     : html`<div><dt>Size</dt><dd>${m.params || NA}</dd></div><div><dt>Likes</dt><dd>${num(m.likes)}</dd></div><div><dt>Downloads</dt><dd>${num(m.downloads)}</dd></div><div><dt>${dateLabel(m)}</dt><dd>${day(m.released_at)}</dd></div>`}</dl>
-  <button class="mini" data-watch="${m.id}">${state.watch.includes(m.id) ? 'Watching' : 'Watch'}</button></article>`;
+  <div class="mc-act"><button class="mini" data-watch="${m.id}">${state.watch.includes(m.id) ? 'Watching' : 'Watch'}</button>${qlBtn(m.id)}</div></article>`;
 
 // Loading placeholder shaped like a signal card, so the page does not jump when the real cards arrive. After a few seconds it explains the wait
 // (pure CSS, no timers): free hosting sleeps when idle and the first request can take up to a minute.

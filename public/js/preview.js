@@ -16,7 +16,7 @@ function el() {
   if (pv) return pv;
   pv = document.createElement('aside'); pv.id = 'pv'; pv.className = 'pv'; pv.hidden = true; pv.setAttribute('aria-label', 'Model preview');
   pv.addEventListener('pointerenter', () => clearTimeout(tClose));
-  pv.addEventListener('pointerleave', () => hide(160));
+  pv.addEventListener('pointerleave', () => { if (!pv.classList.contains('sheet')) hide(160); });
   pv.addEventListener('click', e => { if (e.target.closest('a')) hide(0); });
   document.body.append(pv);
   return pv;
@@ -78,7 +78,30 @@ function hide(ms = 0) {
   }, ms);
 }
 
+// Touch: the same card as a bottom sheet. Opened by the Quick look button; closed by the backdrop, the close button, Escape or navigating.
+let scrim;
+async function sheet(id) {
+  if (!scrim) { scrim = document.createElement('div'); scrim.className = 'pv-scrim'; scrim.hidden = true; scrim.addEventListener('click', closeSheet); document.body.append(scrim); }
+  const p = el(), my = ++seq; clearTimeout(tOpen); clearTimeout(tClose); if (openFor) openFor.removeAttribute('aria-describedby'); openFor = null;
+  for (const k of ['left', 'top', 'width']) p.style.removeProperty(k);
+  p.classList.add('sheet'); p.classList.remove('up'); scrim.hidden = false; p.hidden = false;
+  mount(p, html`<div class="pv-load"><i></i><i></i><i></i></div>`); requestAnimationFrame(() => { p.classList.add('on'); scrim.classList.add('on'); });
+  try { if (!cache.has(id)) cache.set(id, await api('/models/' + mid(id) + '/preview')); }
+  catch (e) { if (my === seq) mount(p, html`<p class="pv-line">Preview not available. Open the model for details.</p><button type="button" class="pv-x">Close</button>`); return wireClose(p); }
+  if (my !== seq) return;
+  mount(p, html`<span class="pv-grab" aria-hidden="true"></span>${card(cache.get(id))}<button type="button" class="pv-x">Close</button>`);
+  p.querySelectorAll('.pv-bar i').forEach(i => i.style.setProperty('--v', i.dataset.v + '%')); wireClose(p);
+}
+const wireClose = p => { const x = p.querySelector('.pv-x'); if (x) x.onclick = closeSheet; };
+function closeSheet() {
+  seq++; if (scrim) { scrim.classList.remove('on'); scrim.hidden = true; }
+  if (pv && pv.classList.contains('sheet')) { pv.classList.remove('on', 'sheet'); pv.hidden = true; }
+}
+
 export function initPreview() {
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-ql]'); if (b) { e.preventDefault(); sheet(b.dataset.ql); } });
+  addEventListener('hashchange', closeSheet);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
   const near = e => (e.target.closest ? e.target.closest(TRIGGER) : null);
   document.addEventListener('pointerover', e => {
     if (e.pointerType !== 'mouse') return;

@@ -16,6 +16,7 @@ import * as you from './views/you.js';
 import * as extras from './views/extras.js';
 import * as admin from './views/admin.js';
 import * as apidocs from './views/apidocs.js';
+import * as digestView from './views/digest.js';
 
 const ICON = {
   now: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', models: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>',
@@ -27,17 +28,18 @@ const rawSvg = k => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // route name -> [view module, which nav item to highlight]
 const VIEWS = {
   now: [home, 'now'], signals: [signals, 'signals'], models: [models, 'models'], model: [model, 'models'], research: [research, 'research'],
-  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], api: [apidocs, 'you'], compare: [extras.compare, 'you'],
+  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], api: [apidocs, 'you'], digest: [digestView, 'you'], compare: [extras.compare, 'you'],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
 const NAV = [['now', 'Now'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
-const PRIVATE = ['watchlist', 'alerts', 'admin', 'saved'];
+const PRIVATE = ['watchlist', 'alerts', 'admin', 'saved', 'digest'];
 
 function shell() {
   mount($('#root'), html`<header class="top">
       <a class="brand" href="#now" aria-label="Signalstack home"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="3.2" fill="#35d4f4"/><circle cx="16" cy="16" r="8" fill="none" stroke="#35d4f4" stroke-opacity=".6" stroke-width="1.6"/><circle cx="16" cy="16" r="12.5" fill="none" stroke="#35d4f4" stroke-opacity=".3" stroke-width="1.3"/></svg>Signalstack</a>
       <nav class="nav" aria-label="Main">${[['now', 'Now'], ['signals', 'Signals'], ['models', 'Models'], ['research', 'Research'], ['companies', 'Companies'], ['compare', 'Compare']].map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${l}</a>`)}</nav>
-      <form class="sform" id="sf" role="search"><label class="sr" for="sq">Search</label><input id="sq" type="search" placeholder="Search models, labs, papers" autocomplete="off"></form>
+      <button type="button" class="sbtn" id="sopen" aria-label="Search" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+      <form class="sform" id="sf" role="search"><label class="sr" for="sq">Search</label><input id="sq" type="search" placeholder="Search models, labs, papers" autocomplete="off"><button type="button" class="sclose" id="sclose" aria-label="Close search">Cancel</button></form>
       <div class="acct" id="acct"></div>
     </header>
     <main id="main" tabindex="-1"></main>
@@ -47,6 +49,11 @@ function shell() {
   // Typing shows quick suggestions (suggest.js); Enter opens the full results page. Typing never moves the person off the page they are on.
   initSuggest(sq, $('#sf'));
   $('#sf').onsubmit = e => { e.preventDefault(); const v = sq.value.trim(); if (v.length >= 2) location.hash = 'search/' + encodeURIComponent(v); };
+  // Phones: the search is an icon that opens a full-width field over the header, and closes on Cancel, Escape or navigating.
+  const top = $('.top'), setSearch = on => { top.classList.toggle('searching', on); $('#sopen').setAttribute('aria-expanded', String(on)); if (on) sq.focus(); };
+  $('#sopen').onclick = () => setSearch(true); $('#sclose').onclick = () => { sq.value = ''; setSearch(false); };
+  sq.addEventListener('keydown', e => { if (e.key === 'Escape') setSearch(false); });
+  addEventListener('hashchange', () => top.classList.remove('searching'));
   drawAcct();
 }
 function drawAcct() {
