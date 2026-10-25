@@ -12,6 +12,7 @@ export async function render() {
       <section class="blk"><header><h2>Your tools</h2></header><div class="grid">
         ${m ? html`<a class="panel" href="#saved"><h3>Saved</h3><p class="sub">${state.saved.size} item${state.saved.size === 1 ? '' : 's'} in ${state.collections.length || 1} collection${state.collections.length === 1 ? '' : 's'}</p></a><a class="panel" href="#watchlist"><h3>Watchlist</h3><p class="sub">${state.watch.length} model${state.watch.length === 1 ? '' : 's'} followed</p></a><a class="panel" href="#alerts"><h3>Alerts</h3><p class="sub">Get notified about what matters to you</p></a>` : ''}
         <a class="panel" href="#compare"><h3>Compare models</h3><p class="sub">Side by side, only known facts</p></a>
+        <a class="panel" href="#api"><h3>API, RSS and embed</h3><p class="sub">Use our data on your own site</p></a>
         <a class="panel" href="#companies"><h3>Companies</h3><p class="sub">Labs we track and their releases</p></a>
         ${c.benchmarks ? html`<a class="panel" href="#benchmarks"><h3>Benchmarks</h3><p class="sub">Results with who measured them</p></a>` : ''}
         ${c.docs ? html`<a class="panel" href="#docs"><h3>Documentation changes</h3><p class="sub">Diff between versions</p></a>` : ''}

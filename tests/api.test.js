@@ -179,3 +179,24 @@ test('collections: save, organise, and keep a snapshot; important signals carry 
   assert.ok(imp.length && imp.every(s => s.matters === null || (typeof s.matters === 'string' && s.matters.length > 20)));
   assert.ok((await api('/api/signals?window=30d')).body.items.filter(s => s.score < 60).every(s => s.matters === null), 'no note on minor signals');
 });
+
+test('public API v1, RSS feed and embeddable widget', async () => {
+  const base = `http://127.0.0.1:${port}`;
+  const s = await fetch(base + '/api/v1/signals?window=30d&limit=3');
+  assert.strictEqual(s.headers.get('access-control-allow-origin'), '*');
+  const sb = await s.json();
+  assert.ok(sb.data.length && sb.meta.attribution && sb.meta.total >= sb.data.length);
+  assert.ok(sb.data.every(x => x.source && 'verification' in x.source && x.type && x.published_at && !('detail' in x)), 'stable public shape');
+  const m = (await (await fetch(base + '/api/v1/models?limit=2')).json());
+  assert.ok(m.data.length && m.data[0].access && 'parameters' in m.data[0]);
+  assert.strictEqual((await fetch(base + '/api/v1/signals', { method: 'OPTIONS' })).status, 204);
+  assert.ok((await (await fetch(base + '/api/v1/labs')).json()).data.some(c => c.id === 'openai'));
+  const feed = await fetch(base + '/feed.xml?window=30d');
+  assert.match(feed.headers.get('content-type'), /rss\+xml/);
+  const xmlText = await feed.text(); assert.match(xmlText, /^<\?xml/); assert.ok((xmlText.match(/<item>/g) || []).length >= 1);
+  const w = await fetch(base + '/embed/now?limit=3&theme=light');
+  assert.strictEqual(w.headers.get('x-frame-options'), null, 'the widget may be framed');
+  assert.match(w.headers.get('content-security-policy'), /frame-ancestors \*/); assert.match(w.headers.get('content-security-policy'), /default-src 'none'/);
+  const wh = await w.text(); assert.match(wh, /Powered by/); assert.doesNotMatch(wh, /<script/i);
+  const app = await fetch(base + '/'); assert.strictEqual(app.headers.get('x-frame-options'), 'DENY', 'the app itself still cannot be framed');
+});

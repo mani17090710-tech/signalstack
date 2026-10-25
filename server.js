@@ -12,6 +12,7 @@ const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
 const { seriesOf } = require('./lib/family');
 const { matters } = require('./lib/matters');
+const pub = require('./lib/publicapi');
 const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
@@ -400,6 +401,44 @@ get(/^\/api\/docs\/diff$/, ({ q }) => {
   if (!a || !b) throw fail(404, 'Version not found.');
   return diffDocs(a.lines, b.lines);
 });
+// ---------- public API v1 ----------
+// A small, stable, read-only subset for other people's sites and tools. Open to any origin (CORS), cached for a minute, covered by the same
+// per-IP rate limit as the rest of the API. Shapes live in lib/publicapi.js; the page at #api documents them.
+const v1q = (q, keys) => new URLSearchParams([...q].filter(([k]) => keys.includes(k)));
+const v1meta = (extra = {}) => ({ generated_at: new Date().toISOString(), attribution: pub.ATTRIBUTION, ...extra });
+get(/^\/api\/v1$/, () => ({ name: 'Signalstack public API', version: 1, attribution: pub.ATTRIBUTION, endpoints: ['/api/v1/now', '/api/v1/signals', '/api/v1/models', '/api/v1/labs', '/feed.xml', '/embed/now'], docs: '/#api' }));
+get(/^\/api\/v1\/signals$/, ({ q }) => {
+  const all = signals(v1q(q, ['window', 'cat', 'company', 'verification', 'minScore', 'sort'])), { limit, offset } = pageOf(q);
+  return { data: all.slice(offset, offset + limit).map(pub.v1Signal), meta: v1meta({ total: all.length, limit, offset }) };
+});
+get(/^\/api\/v1\/now$/, () => {
+  const day = signals(new URLSearchParams('window=24h')), pool = day.length >= 5 ? day : signals(new URLSearchParams('window=7d'));
+  return { data: ranked(pool).slice(0, 10).map(pub.v1Signal), meta: v1meta({ window: pool === day ? '24h' : '7d', ranking: 'Signal Score faded by age (importance plus recency)' }) };
+});
+get(/^\/api\/v1\/models$/, ({ q }) => {
+  const list = routes.find(([, re]) => re.test('/api/models'))[2]({ q: v1q(q, ['q', 'company', 'cat', 'license', 'task', 'sort', 'source', 'verification', 'limit', 'offset']) }), { limit, offset } = pageOf(q);
+  return { data: list.items.map(pub.v1Model), meta: v1meta({ total: list.total, limit, offset }) };
+});
+get(/^\/api\/v1\/labs$/, () => ({ data: COMPANIES.map(c => ({ id: c.id, name: c.name, site: c.site || null })), meta: v1meta() }));
+
+// RSS feed and the embeddable widget (plain pages, not JSON).
+const baseUrl = req => process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `${process.env.TRUST_PROXY === 'true' ? req.headers['x-forwarded-proto'] || 'https' : 'http'}://${req.headers.host}`;
+function servePublic(req, res, p, q) {
+  const base = baseUrl(req).replace(/\/$/, '');
+  if (p === '/feed.xml') {
+    const items = signals(v1q(q, ['window', 'cat', 'company', 'verification', 'minScore'])).slice(0, 50);
+    const body = pub.rss(items, { base, title: 'Signalstack: AI releases and research', desc: 'New AI models, papers and releases, each linked to its original source.', self: base + '/feed.xml' });
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*' });
+    return res.end(body);
+  }
+  const day = signals(new URLSearchParams('window=24h')), pool = day.length >= 5 ? day : signals(new URLSearchParams('window=7d'));
+  const items = ranked(pool).slice(0, Math.min(Math.max(+q.get('limit') || 5, 1), 10));
+  // The widget is meant to be framed anywhere, so it drops the site-wide frame ban and allows nothing but its own stylesheet.
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy': "default-src 'none'; style-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'none'" });
+  res.end(pub.embedHtml(items, { base, title: 'AI right now', theme: q.get('theme') }));
+}
+
 // Search: results grouped by type so the page can show Models, Companies, Papers, Signals and Benchmarks separately.
 get(/^\/api\/search$/, ({ q }) => {
   const t = (q.get('q') || '').trim().slice(0, 100); if (t.length < 2) return {};
@@ -422,10 +461,15 @@ get(/^\/api\/search$/, ({ q }) => {
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'), p = u.pathname, q = u.searchParams;
   const ip = (process.env.TRUST_PROXY === 'true' && String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()) || req.socket.remoteAddress;
+  if (p === '/feed.xml' || p === '/embed/now') {
+    if (limited('api:' + ip, 300)) { res.writeHead(429, { 'Content-Type': 'text/plain' }); return res.end('Too many requests. Wait a minute and try again.'); }
+    try { return servePublic(req, res, p, q); } catch (e) { console.error(e); res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end('Something went wrong.'); }
+  }
   if (!p.startsWith('/api')) {
     try { return serveStatic(req, res, p); } catch (e) { res.writeHead(400); return res.end('Bad request'); }
   }
-  if (limited('api:' + ip, 300)) return send(req, res, 429, { error: 'Too many requests. Wait a minute and try again.' });
+  if (req.method === 'OPTIONS' && p.startsWith('/api/v1')) { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Max-Age': '86400' }); return res.end(); }
+  if (limited('api:' + ip, 300)) return send(req, res, 429, { error: 'Too many requests. Wait a minute and try again.' }, p.startsWith('/api/v1') ? { 'Access-Control-Allow-Origin': '*' } : {});
   let body = '';
   req.on('data', c => { body += c; if (body.length > 1e5) req.destroy(); });
   req.on('end', async () => {
@@ -434,7 +478,7 @@ http.createServer((req, res) => {
       if (req.method === 'GET') {
         for (const [, re, fn] of routes) {
           const m = p.match(re); if (!m) continue;
-          return send(req, res, 200, await fn({ q, m }), PUBLIC_CACHE);
+          return send(req, res, 200, await fn({ q, m }), p.startsWith('/api/v1') ? { ...PUBLIC_CACHE, 'Access-Control-Allow-Origin': '*' } : PUBLIC_CACHE);
         }
       }
       const j = body ? JSON.parse(body) : {}, sid = (req.headers.cookie || '').match(/sid=([a-f0-9]+)/)?.[1];
@@ -682,7 +726,7 @@ http.createServer((req, res) => {
       }
       reply(404, { error: 'Endpoint not found.' });
     } catch (e) {
-      if (e.code && typeof e.code === 'number') return send(req, res, e.code, { error: e.message });
+      if (e.code && typeof e.code === 'number') return send(req, res, e.code, { error: e.message }, p.startsWith('/api/v1') ? { 'Access-Control-Allow-Origin': '*' } : {});
       if (e instanceof SyntaxError) return send(req, res, 400, { error: 'Request could not be read.' });
       console.error(e);
       send(req, res, 500, { error: 'Something went wrong on our side. Try again shortly.' });

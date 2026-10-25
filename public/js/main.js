@@ -15,6 +15,7 @@ import * as search from './views/search.js';
 import * as you from './views/you.js';
 import * as extras from './views/extras.js';
 import * as admin from './views/admin.js';
+import * as apidocs from './views/apidocs.js';
 
 const ICON = {
   now: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', models: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>',
@@ -26,7 +27,7 @@ const rawSvg = k => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // route name -> [view module, which nav item to highlight]
 const VIEWS = {
   now: [home, 'now'], signals: [signals, 'signals'], models: [models, 'models'], model: [model, 'models'], research: [research, 'research'],
-  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], compare: [extras.compare, 'you'],
+  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], api: [apidocs, 'you'], compare: [extras.compare, 'you'],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
 const NAV = [['now', 'Now'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
@@ -58,7 +59,7 @@ function drawAcct() {
 // Footer trust line, from the site status. Hidden until the numbers arrive, and on Now (which shows the same facts at the top).
 function drawTrust() {
   const st = state.status || {}, f = $('#trust'); if (!f || !st.counts) return;
-  mount(f, html`${trustBar({ week: st.counts.eventsWeek, sources: st.sources && st.sources.total, lastChecked: st.lastUpdate })}<p>Every item links to its original source and says how far that source can be trusted.</p>`); f.hidden = false;
+  mount(f, html`${trustBar({ week: st.counts.eventsWeek, sources: st.sources && st.sources.total, lastChecked: st.lastUpdate })}<p>Every item links to its original source and says how far that source can be trusted. <a href="#api">API, RSS and embed</a></p>`); f.hidden = false;
 }
 let seq = 0;
 export async function route() {
