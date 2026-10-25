@@ -11,6 +11,7 @@ const resets = require('./lib/reset');
 const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
 const { seriesOf } = require('./lib/family');
+const { matters } = require('./lib/matters');
 const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
@@ -136,6 +137,10 @@ function signalOut(e) {
     score: sc.score, importance: sc.importance, parts: sc.parts, why: sc.why, meta,
     // True only when the link is on one of the lab's own domains (https), so the page can say "official site" without guessing.
     official_domain: !!(co && e.source && isOfficialUrl(COMPANY[co.id] || co, e.source)),
+    // A short plain-language note for important signals, written by fixed rules from the facts above (null when there is nothing solid to say).
+    matters: matters({ cat: e.cat, score: sc.score, companyName: co && co.name, tier: meta.tier || (e.verification === 'verified' || e.verification === 'source_verified' ? 'primary' : null), meta,
+      mentionNames: (meta.mentions || []).map(id => (byId(id) || {}).name),
+      model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, ctx_tokens: e.mctx, adoption: !['openrouter', 'curated'].includes(e.msrc), hoursOld: e.mreleased ? (Date.now() - parseTs(e.mreleased)) / 36e5 : null } : null }),
   };
 }
 
@@ -488,6 +493,61 @@ http.createServer((req, res) => {
       const needAdmin = () => { if (!need()) return false; if (!isAdmin) { reply(403, { error: 'This area is for admins only.' }); return false; } return true; };
 
       // personal (login required)
+      // Collections: save signals, models and papers, and sort them into named lists.
+      if (p === '/api/collections' || p.startsWith('/api/saved')) {
+        if (!need()) return;
+        const SRC_LABEL = { huggingface: 'Hugging Face', openrouter: 'OpenRouter', curated: 'Official', arxiv: 'arXiv', 'github-release': 'GitHub', blog: 'Blog' };
+        const first = () => { let c = db.prepare('select id from collections where user_id=? order by id limit 1').get(uid); if (!c) c = { id: Number(db.prepare("insert into collections(user_id,name) values(?,'Saved')").run(uid).lastInsertRowid) }; return c.id; };
+        const mine = id => db.prepare('select id from collections where id=? and user_id=?').get(+id, uid);
+        const state = () => { first(); return { collections: db.prepare('select c.id,c.name,(select count(*) from saved s where s.collection_id=c.id) n from collections c where c.user_id=? order by c.id').all(uid),
+          saved: db.prepare("select distinct kind||'|'||ref k from saved where user_id=? limit 3000").all(uid).map(r => r.k) }; };
+        const snap = (kind, ref) => {
+          if (kind === 'signal') { const e = db.prepare(`select e.id,coalesce(e.title,e.summary) t,e.source,e.source_type from events e where e.id=? and ${EV_OK}`).get(+ref); return e && { title: e.t, url: e.source, source: SRC_LABEL[e.source_type] || 'Signal', ref: String(e.id) }; }
+          if (kind === 'model') { const m = db.prepare('select id,name,source_type from models where id=? and verified=1').get(ref); return m && { title: String(m.name).split('/').pop(), url: null, source: SRC_LABEL[m.source_type] || 'Model', ref: m.id }; }
+          if (kind === 'paper') { const x = db.prepare('select arxiv_id,id,title,url from papers where (arxiv_id=? or id=?) and verified=1').get(ref, ref); return x && { title: x.title, url: x.url, source: 'arXiv', ref: x.arxiv_id || x.id }; }
+          return null;
+        };
+        if (p === '/api/collections') {
+          if (req.method === 'POST') {
+            const name = String(j.name || '').trim().slice(0, 40); if (!name) return reply(400, { error: 'Give the collection a name.' });
+            if (db.prepare('select count(*) c from collections where user_id=?').get(uid).c >= 30) return reply(400, { error: 'You have reached 30 collections.' });
+            try { db.prepare('insert into collections(user_id,name) values(?,?)').run(uid, name); } catch (e) { return reply(400, { error: 'You already have a collection with that name.' }); }
+          } else if (req.method === 'DELETE') {
+            if (!mine(j.id)) return reply(404, { error: 'Collection not found.' });
+            if (+j.id === first()) return reply(400, { error: 'Your first collection cannot be deleted.' });
+            db.prepare('delete from collections where id=? and user_id=?').run(+j.id, uid);
+          }
+          return reply(200, state());
+        }
+        if (p === '/api/collections/rename' && req.method === 'POST') {
+          const name = String(j.name || '').trim().slice(0, 40); if (!name || !mine(j.id)) return reply(400, { error: 'Give the collection a name.' });
+          try { db.prepare('update collections set name=? where id=? and user_id=?').run(name, +j.id, uid); } catch (e) { return reply(400, { error: 'You already have a collection with that name.' }); }
+          return reply(200, state());
+        }
+        if (p === '/api/saved/where' && req.method === 'GET') return reply(200, { collections: db.prepare('select collection_id id from saved where user_id=? and kind=? and ref=?').all(uid, String(q.get('kind') || ''), String(q.get('ref') || '')).map(r => r.id) });
+        if (p === '/api/saved' && req.method === 'GET') {
+          const cid = q.get('collection') ? +q.get('collection') : first(); if (!mine(cid)) return reply(404, { error: 'Collection not found.' });
+          return reply(200, { collection: cid, items: db.prepare('select kind,ref,title,url,source,saved_at from saved where user_id=? and collection_id=? order by id desc limit 300').all(uid, cid) });
+        }
+        if (p === '/api/saved' && (req.method === 'POST' || req.method === 'DELETE')) {
+          const kind = String(j.kind || ''), ref = String(j.ref || '').slice(0, 200), cid = j.collection_id ? +j.collection_id : first();
+          if (!mine(cid)) return reply(404, { error: 'Collection not found.' });
+          if (req.method === 'POST') {
+            const sn = snap(kind, ref); if (!sn) return reply(404, { error: 'That item is no longer available.' });
+            if (db.prepare('select count(*) c from saved where user_id=?').get(uid).c >= 3000) return reply(400, { error: 'You have saved the maximum number of items.' });
+            db.prepare('insert or ignore into saved(user_id,collection_id,kind,ref,title,url,source) values(?,?,?,?,?,?,?)').run(uid, cid, kind, sn.ref, sn.title, sn.url, sn.source);
+          } else if (j.collection_id) db.prepare('delete from saved where user_id=? and collection_id=? and kind=? and ref=?').run(uid, cid, kind, ref);
+          else db.prepare('delete from saved where user_id=? and kind=? and ref=?').run(uid, kind, ref);
+          return reply(200, state());
+        }
+        if (p === '/api/saved/move' && req.method === 'POST') {
+          if (!mine(j.from) || !mine(j.to)) return reply(404, { error: 'Collection not found.' });
+          db.prepare('update or ignore saved set collection_id=? where user_id=? and collection_id=? and kind=? and ref=?').run(+j.to, uid, +j.from, String(j.kind), String(j.ref));
+          db.prepare('delete from saved where user_id=? and collection_id=? and kind=? and ref=?').run(uid, +j.from, String(j.kind), String(j.ref));
+          return reply(200, state());
+        }
+        return reply(404, { error: 'Not found.' });
+      }
       // Follow a lab or a model series; the Now page shows what is new from everything you follow or watch.
       if (p === '/api/follows') {
         if (!need()) return;

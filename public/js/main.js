@@ -5,6 +5,7 @@ import { showIntro, introSeen } from './intro.js';
 import * as motion from './motion.js';
 import { initPreview } from './preview.js';
 import { initSuggest } from './suggest.js';
+import * as savedMod from './saved.js';
 import * as home from './views/home.js';
 import * as signals from './views/signals.js';
 import * as models from './views/models.js';
@@ -25,11 +26,11 @@ const rawSvg = k => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // route name -> [view module, which nav item to highlight]
 const VIEWS = {
   now: [home, 'now'], signals: [signals, 'signals'], models: [models, 'models'], model: [model, 'models'], research: [research, 'research'],
-  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], compare: [extras.compare, 'you'],
+  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], compare: [extras.compare, 'you'],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
 const NAV = [['now', 'Now'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
-const PRIVATE = ['watchlist', 'alerts', 'admin'];
+const PRIVATE = ['watchlist', 'alerts', 'admin', 'saved'];
 
 function shell() {
   mount($('#root'), html`<header class="top">
@@ -49,8 +50,8 @@ function shell() {
 }
 function drawAcct() {
   const m = state.me;
-  mount($('#acct'), m ? html`${m.role === 'admin' ? html`<a class="adminlink" href="#admin">Admin</a>` : ''}<a class="who" href="#you" title="Your account">${m.name || m.email}</a><button id="lo" class="desk">Log out</button>` : html`<button id="li" class="desk">Log in</button><button class="pri" id="su">Sign up</button>`);
-  if (m) $('#lo').onclick = async () => { await api('/logout'); state.me = null; state.watch = []; state.follows = []; drawAcct(); route(); };
+  mount($('#acct'), m ? html`<a class="adminlink" href="#saved">Saved</a>${m.role === 'admin' ? html`<a class="adminlink" href="#admin">Admin</a>` : ''}<a class="who" href="#you" title="Your account">${m.name || m.email}</a><button id="lo" class="desk">Log out</button>` : html`<button id="li" class="desk">Log in</button><button class="pri" id="su">Sign up</button>`);
+  if (m) $('#lo').onclick = async () => { await api('/logout'); state.me = null; state.watch = []; state.follows = []; state.saved = new Set(); state.collections = []; drawAcct(); route(); };
   else { $('#li').onclick = () => openAuth('login', boot); $('#su').onclick = () => openAuth('signup', boot); }
 }
 
@@ -97,6 +98,8 @@ document.addEventListener('click', async e => {
     if (location.hash.startsWith('#watchlist')) route();
     return;
   }
+  const sv = e.target.closest('[data-save]');
+  if (sv) { if (!state.me) return openAuth('login', boot); return savedMod.onSave(sv); }
   const fo = e.target.closest('[data-follow]');
   if (fo) {
     if (!state.me) return openAuth('login', boot);
@@ -125,10 +128,10 @@ async function pollAlerts() {
 }
 
 export async function boot() {
-  state.me = null; state.watch = []; state.follows = [];
+  state.me = null; state.watch = []; state.follows = []; state.saved = new Set(); state.collections = [];
   if (!$('#main')) shell(); else drawAcct();
   // Everything starts at once instead of one request after another: the page, who is logged in, and the site counts.
-  const who = (async () => { try { state.me = await api('/me'); [state.watch, state.follows] = await Promise.all([api('/watchlist'), api('/follows')]); } catch (e) { /* guest */ } })()
+  const who = (async () => { let saved; try { state.me = await api('/me'); [state.watch, state.follows, saved] = await Promise.all([api('/watchlist'), api('/follows'), api('/collections')]); savedMod.applyState(saved); } catch (e) { /* guest */ } })()
     .then(() => { drawAcct(); markFollows(); $$('[data-watch]').forEach(b => { if (state.watch.includes(b.dataset.watch)) b.textContent = 'Watching'; }); });
   state.whoReady = who; // pages that need to know who is logged in (the Now page's Watching section) wait for this
   const stat = api('/status').then(s => { state.status = s; drawTrust(); }).catch(() => { /* the page shows its own error */ });
@@ -147,4 +150,4 @@ setInterval(() => $$('[data-ts]').forEach(el => {
 }), 60000);
 // Play the intro when someone arrives at the front door (no link to a specific page), once per visit.
 if (!introSeen() && ['', 'now'].includes(location.hash.replace(/^#\/?/, ''))) showIntro(go);
-initPreview();
+initPreview(); savedMod.initSaved();

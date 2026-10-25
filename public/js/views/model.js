@@ -1,6 +1,6 @@
 // Model detail: facts with their source, a Signal Score with its reasoning, related research and history.
 import { explainer, animateExplainer } from './explain.js';
-import { followBtn, api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi, figureSource, SOURCE_NAME, EVIDENCE_LABEL, dateLabel } from '../lib.js';
+import { saveBtn, followBtn, api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi, figureSource, SOURCE_NAME, EVIDENCE_LABEL, dateLabel } from '../lib.js';
 
 const fact = (k, v, unit = '', src = '') => html`<dt>${k}</dt><dd>${v == null || v === '' ? html`<span class="na">${NA}</span>` : v}${v == null || v === '' ? '' : unit}${v == null || v === '' || !src ? '' : html`<span class="fig">${src}</span>`}</dd>`;
 
@@ -11,7 +11,7 @@ export async function render(id) {
     title: name,
     after: root => animateExplainer(root),
     html: html`<p class="checked"><a href="#models">Model Universe</a> / ${m.company ? html`<a href="#company/${m.company_id}">${m.company}</a>` : m.creator || 'Community'}</p>
-      ${pageHead(name.split('/').pop(), m.company ? `Published by ${m.company}` : `Uploaded by ${m.creator || 'an unknown publisher'}`, html`<button data-watch="${m.id}" data-long="1" class="pri">${state.watch.includes(m.id) ? 'Watching' : 'Watch this model'}</button>`)}
+      ${pageHead(name.split('/').pop(), m.company ? `Published by ${m.company}` : `Uploaded by ${m.creator || 'an unknown publisher'}`, html`<span class="labact">${saveBtn('model', m.id)}<button data-watch="${m.id}" data-long="1" class="pri">${state.watch.includes(m.id) ? 'Watching' : 'Watch this model'}</button></span>`)}
       <div class="tags">${verBadge(m.verification)}${m.cats.map(c => html`<span class="tag">${CAT_LABEL[c] || c}</span>`)}${m.gated ? html`<span class="tag">Gated access</span>` : ''}</div>
       ${explainer(d)}
       <div class="mt">

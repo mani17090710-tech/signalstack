@@ -32,7 +32,9 @@ export async function api(p, method = 'GET', body) {
   }
 }
 
-export const state = { me: null, watch: [], follows: [], status: { counts: {} }, whoReady: Promise.resolve() };
+export const state = { me: null, watch: [], follows: [], saved: new Set(), collections: [], status: { counts: {} }, whoReady: Promise.resolve() };
+// Save / Saved toggle for a signal, model or paper. main.js and saved.js handle the click (a menu when you have several collections).
+export const saveBtn = (kind, ref) => { const on = state.saved.has(kind + '|' + ref); return html`<button class="save ${on ? 'on' : ''}" data-save="${kind}|${ref}" aria-pressed="${on}" title="${on ? 'Saved. Click to change' : 'Save for later'}"><svg viewBox="0 0 24 24" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>${on ? 'Saved' : 'Save'}</span></button>`; };
 // Follow / Following toggle for a lab (kind 'lab', key = lab id) or a model series (kind 'family', key = 'lab:series'). main.js handles the click.
 export const followBtn = (kind, key, big = false) => { const on = state.follows.some(f => f.kind === kind && f.key === key); return html`<button class="follow ${big ? 'pri' : ''} ${on ? 'on' : ''}" data-follow="${kind}|${key}" aria-pressed="${on}">${on ? 'Following' : 'Follow'}</button>`; };
 
@@ -139,9 +141,10 @@ const card = (s, lead) => {
     </header>
     <h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
     ${sum ? html`<p class="sc-sum">${sum}</p>` : ''}
+    ${s.matters ? html`<p class="matters"><b>Why this matters</b>${s.matters} <span class="matters-note">Written from the data, not by AI.</span></p>` : ''}
     ${provBlock(s)}
     <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}<span class="imp imp-${s.importance}">${s.importance}</span></div>
-    <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>` : ''}</div>
+    <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>` : ''}${saveBtn('signal', s.id)}</div>
     ${scoreBreakdown(s)}</article>`;
 };
 

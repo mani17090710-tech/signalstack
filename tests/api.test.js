@@ -155,3 +155,27 @@ test('following labs and series is private and feeds the Watching list', async (
   r = await (await post('/api/follows', { kind: 'lab', key: 'qwen' }, cookie, 'DELETE')).json();
   assert.deepStrictEqual(r, [{ kind: 'family', key: 'qwen:qwen' }]);
 });
+
+test('collections: save, organise, and keep a snapshot; important signals carry a plain "why this matters" note', async () => {
+  const base = `http://127.0.0.1:${port}`, call = async (path, method, body, cookie) => { const r = await fetch(base + path, { method, headers: { cookie }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => ({})), headers: r.headers }; };
+  assert.strictEqual((await call('/api/collections', 'GET')).status, 401);
+  const cookie = (await fetch(base + '/api/login', { method: 'POST', body: JSON.stringify({ email: 'a@b.co', password: 'longenough' }) })).headers.get('set-cookie').split(';')[0];
+  let r = (await call('/api/collections', 'GET', null, cookie)).body;
+  assert.strictEqual(r.collections.length, 1); const first = r.collections[0].id;
+  const sig = (await api('/api/signals?window=30d')).body.items[0];
+  r = (await call('/api/saved', 'POST', { kind: 'signal', ref: String(sig.id) }, cookie)).body;
+  assert.ok(r.saved.includes('signal|' + sig.id));
+  r = (await call('/api/saved', 'POST', { kind: 'model', ref: 'hf:Qwen/Qwen3-8B' }, cookie)).body;
+  assert.strictEqual(r.collections[0].n, 2);
+  assert.strictEqual((await call('/api/saved', 'POST', { kind: 'model', ref: 'hf:nope/none' }, cookie)).status, 404, 'unknown items cannot be saved');
+  const nc = (await call('/api/collections', 'POST', { name: 'To read' }, cookie)).body.collections.find(c => c.name === 'To read').id;
+  assert.strictEqual((await call('/api/collections', 'POST', { name: 'To read' }, cookie)).status, 400, 'names are unique');
+  await call('/api/saved/move', 'POST', { kind: 'model', ref: 'hf:Qwen/Qwen3-8B', from: first, to: nc }, cookie);
+  const inNew = (await call('/api/saved?collection=' + nc, 'GET', null, cookie)).body.items;
+  assert.deepStrictEqual(inNew.map(i => [i.kind, i.ref, i.title]), [['model', 'hf:Qwen/Qwen3-8B', 'Qwen3-8B']]);
+  assert.strictEqual((await call('/api/collections', 'DELETE', { id: first }, cookie)).status, 400, 'the first collection stays');
+  assert.strictEqual((await call('/api/collections', 'DELETE', { id: nc }, cookie)).status, 200);
+  const imp = (await api('/api/signals?window=30d')).body.items.filter(s => s.score >= 60);
+  assert.ok(imp.length && imp.every(s => s.matters === null || (typeof s.matters === 'string' && s.matters.length > 20)));
+  assert.ok((await api('/api/signals?window=30d')).body.items.filter(s => s.score < 60).every(s => s.matters === null), 'no note on minor signals');
+});
