@@ -14,7 +14,7 @@
 // for password-reset codes. If you later verify your own domain on Resend, set RESEND_FROM
 // to an address on that domain and it'll be used instead.
  
-async function sendMail({to,subject,text}){
+async function sendMail({to,subject,text,html,headers}){
 const key=process.env.RESEND_API_KEY;
 if(!key)return{ok:false,error:'Email not configured. Set RESEND_API_KEY in the environment (free account at resend.com) to enable email alerts.'};
 const from=process.env.RESEND_FROM||'Signalstack <onboarding@resend.dev>';
@@ -22,7 +22,7 @@ try{
 const r=await fetch('https://api.resend.com/emails',{
 method:'POST',
 headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},
-body:JSON.stringify({from,to:[to],subject,text}),
+body:JSON.stringify({from,to:[to],subject,text,...(html?{html}:{}),...(headers?{headers}:{})}),
 signal:AbortSignal.timeout(15000)
 });
 const d=await r.json().catch(()=>({}));

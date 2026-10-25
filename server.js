@@ -11,6 +11,9 @@ const resets = require('./lib/reset');
 const byId = id => COMPANY[id] || null;
 const { CATEGORY_LABELS } = require('./lib/classify');
 const { seriesOf } = require('./lib/family');
+const { matters } = require('./lib/matters');
+const pub = require('./lib/publicapi');
+const digest = require('./lib/digest');
 const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
@@ -36,7 +39,7 @@ function limited(key, max, ms = 60000) {
   a.push(n); buckets.set(key, a);
   return a.length > max;
 }
-setInterval(() => { const n = Date.now(); for (const [k, a] of buckets) if (!a.some(t => n - t < 60000)) buckets.delete(k); }, 300000).unref();
+setInterval(() => { const n = Date.now(); for (const [k, a] of buckets) if (!a.some(t => n - t < 36e5)) buckets.delete(k); }, 300000).unref();
 
 const SECURITY = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'X-Frame-Options': 'DENY',
@@ -136,6 +139,10 @@ function signalOut(e) {
     score: sc.score, importance: sc.importance, parts: sc.parts, why: sc.why, meta,
     // True only when the link is on one of the lab's own domains (https), so the page can say "official site" without guessing.
     official_domain: !!(co && e.source && isOfficialUrl(COMPANY[co.id] || co, e.source)),
+    // A short plain-language note for important signals, written by fixed rules from the facts above (null when there is nothing solid to say).
+    matters: matters({ cat: e.cat, score: sc.score, companyName: co && co.name, tier: meta.tier || (e.verification === 'verified' || e.verification === 'source_verified' ? 'primary' : null), meta,
+      mentionNames: (meta.mentions || []).map(id => (byId(id) || {}).name),
+      model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, ctx_tokens: e.mctx, adoption: !['openrouter', 'curated'].includes(e.msrc), hoursOld: e.mreleased ? (Date.now() - parseTs(e.mreleased)) / 36e5 : null } : null }),
   };
 }
 
@@ -203,6 +210,21 @@ function ranked(list) {
   }
   return out;
 }
+// What is new from the labs, series and models a person follows or watches (shared by the Now page and the digest).
+function watchingFor(uid, limit, windowDays = 30) {
+  const fol = db.prepare('select kind,key from follows where user_id=?').all(uid), watched = new Set(db.prepare('select model_id from watchlist where user_id=?').all(uid).map(r => r.model_id));
+  const labs = new Map(fol.filter(f => f.kind === 'lab' && byId(f.key)).map(f => [f.key, byId(f.key).name])), fam = new Map(), famLabel = new Map();
+  for (const f of fol.filter(x => x.kind === 'family')) {
+    const g = seriesOf(labRows(f.key.split(':')[0])).find(x => x.key === f.key); if (!g) continue;
+    famLabel.set(f.key, `${byId(g.company_id).name} ${g.label}`); g.models.forEach(mm => fam.set(mm.id, f.key));
+  }
+  const pool = signals(new URLSearchParams('window=' + windowDays + 'd')).map(sg => {
+    const because = watched.has(sg.model_id) ? 'You watch this model' : fam.has(sg.model_id) ? `You follow ${famLabel.get(fam.get(sg.model_id))}` : labs.has(sg.company_id) ? `You follow ${labs.get(sg.company_id)}` : null;
+    return because ? { ...sg, because } : null;
+  }).filter(Boolean);
+  return { items: ranked(pool).slice(0, limit), total: pool.length, follows: { labs: [...labs].map(([id, name]) => ({ id, name })), families: [...famLabel].map(([key, label]) => ({ key, label })), models: watched.size } };
+}
+
 get(/^\/api\/now$/, () => {
   const day = signals(new URLSearchParams('window=24h')), week = signals(new URLSearchParams('window=7d'));
   const pool = day.length >= 5 ? day : week;
@@ -395,6 +417,95 @@ get(/^\/api\/docs\/diff$/, ({ q }) => {
   if (!a || !b) throw fail(404, 'Version not found.');
   return diffDocs(a.lines, b.lines);
 });
+// ---------- public API v1 ----------
+// A small, stable, read-only subset for other people's sites and tools. Open to any origin (CORS), cached for a minute, covered by the same
+// per-IP rate limit as the rest of the API. Shapes live in lib/publicapi.js; the page at #api documents them.
+const v1q = (q, keys) => new URLSearchParams([...q].filter(([k]) => keys.includes(k)));
+const v1meta = (extra = {}) => ({ generated_at: new Date().toISOString(), attribution: pub.ATTRIBUTION, ...extra });
+get(/^\/api\/v1$/, () => ({ name: 'Signalstack public API', version: 1, attribution: pub.ATTRIBUTION, endpoints: ['/api/v1/now', '/api/v1/signals', '/api/v1/models', '/api/v1/labs', '/feed.xml', '/embed/now'], docs: '/#api' }));
+get(/^\/api\/v1\/signals$/, ({ q }) => {
+  const all = signals(v1q(q, ['window', 'cat', 'company', 'verification', 'minScore', 'sort'])), { limit, offset } = pageOf(q);
+  return { data: all.slice(offset, offset + limit).map(pub.v1Signal), meta: v1meta({ total: all.length, limit, offset }) };
+});
+get(/^\/api\/v1\/now$/, () => {
+  const day = signals(new URLSearchParams('window=24h')), pool = day.length >= 5 ? day : signals(new URLSearchParams('window=7d'));
+  return { data: ranked(pool).slice(0, 10).map(pub.v1Signal), meta: v1meta({ window: pool === day ? '24h' : '7d', ranking: 'Signal Score faded by age (importance plus recency)' }) };
+});
+get(/^\/api\/v1\/models$/, ({ q }) => {
+  const list = routes.find(([, re]) => re.test('/api/models'))[2]({ q: v1q(q, ['q', 'company', 'cat', 'license', 'task', 'sort', 'source', 'verification', 'limit', 'offset']) }), { limit, offset } = pageOf(q);
+  return { data: list.items.map(pub.v1Model), meta: v1meta({ total: list.total, limit, offset }) };
+});
+get(/^\/api\/v1\/labs$/, () => ({ data: COMPANIES.map(c => ({ id: c.id, name: c.name, site: c.site || null })), meta: v1meta() }));
+
+// RSS feed and the embeddable widget (plain pages, not JSON).
+const baseUrl = req => process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `${process.env.TRUST_PROXY === 'true' ? req.headers['x-forwarded-proto'] || 'https' : 'http'}://${req.headers.host}`;
+function servePublic(req, res, p, q) {
+  const base = baseUrl(req).replace(/\/$/, '');
+  if (p === '/feed.xml') {
+    const items = signals(v1q(q, ['window', 'cat', 'company', 'verification', 'minScore'])).slice(0, 50);
+    const body = pub.rss(items, { base, title: 'Signalstack: AI releases and research', desc: 'New AI models, papers and releases, each linked to its original source.', self: base + '/feed.xml' });
+    res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*' });
+    return res.end(body);
+  }
+  const day = signals(new URLSearchParams('window=24h')), pool = day.length >= 5 ? day : signals(new URLSearchParams('window=7d'));
+  const items = ranked(pool).slice(0, Math.min(Math.max(+q.get('limit') || 5, 1), 10));
+  // The widget is meant to be framed anywhere, so it drops the site-wide frame ban and allows nothing but its own stylesheet.
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy': "default-src 'none'; style-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'none'" });
+  res.end(pub.embedHtml(items, { base, title: 'AI right now', theme: q.get('theme') }));
+}
+
+// ---------- digests (email per person, Telegram per channel) ----------
+const siteBase = () => (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT).replace(/\/$/, '');
+const digestGroups = (freq, skip = new Set()) => {
+  const win = freq === 'weekly' ? '7d' : '24h', pool = signals(new URLSearchParams('window=' + win)), use = pool.length >= 5 || freq === 'weekly' ? pool : signals(new URLSearchParams('window=7d'));
+  return NOW_GROUPS.map(([, label, cats, n]) => ({ label, items: ranked(use.filter(x => cats.includes(x.cat) && x.score >= SIGNIFICANT - 20 && !skip.has(x.id))).slice(0, Math.min(n, 3)) }));
+};
+function digestFor(uid, freq) {
+  const u = db.prepare('select name from users where id=?').get(uid) || {}, pr = db.prepare('select token from digest_prefs where user_id=?').get(uid) || {};
+  const watch = watchingFor(uid, 4, freq === 'weekly' ? 7 : 2).items;
+  const groups = digestGroups(freq, new Set(watch.map(x => x.id)));
+  return { ...digest.build({ freq, groups, watching: watch, base: siteBase(), unsubscribeUrl: `${siteBase()}/digest/unsubscribe?t=${pr.token || ''}`, name: u.name || '' }) };
+}
+async function sendDigest(uid, freq, { force = false } = {}) {
+  const u = db.prepare('select email from users where id=?').get(uid); if (!u) return { ok: false, error: 'No such account.' };
+  const d = digestFor(uid, freq); if (!d.count && !force) return { ok: true, skipped: true };
+  const tok = db.prepare('select token from digest_prefs where user_id=?').get(uid)?.token;
+  return sendMail({ to: u.email, subject: d.subject, text: d.text, html: d.html, headers: tok ? { 'List-Unsubscribe': `<${siteBase()}/digest/unsubscribe?t=${tok}>` } : undefined });
+}
+async function digestTick() {
+  try {
+    const now = Date.now();
+    for (const pr of db.prepare("select * from digest_prefs where freq in ('daily','weekly')").all()) {
+      if (!digest.due(pr, now)) continue;
+      // Stamp first, so a slow or failing send is never repeated every tick; a failure is logged and the next slot tries again.
+      db.prepare("update digest_prefs set last_sent=datetime('now') where user_id=?").run(pr.user_id);
+      const r = await sendDigest(pr.user_id, pr.freq);
+      db.prepare('insert into notification_log(user_id,channel,status,error) values(?,?,?,?)').run(pr.user_id, 'digest', r.ok ? (r.skipped ? 'skipped' : 'sent') : 'failed', r.error || null);
+    }
+    await telegramTick(now);
+  } catch (e) { console.error('Digest run failed:', e.message); }
+}
+// One daily post to a Telegram channel or group, only when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set. TELEGRAM_HOUR_UTC picks the hour (default 4).
+async function telegramTick(now) {
+  const tok = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID; if (!tok || !chat) return;
+  const hour = Math.min(Math.max(+process.env.TELEGRAM_HOUR_UTC || 4, 0), 23), slot = digest.lastSlot({ freq: 'daily', hour, tz_offset: 0 }, now);
+  const last = db.prepare("select v from digest_state where k='telegram_last'").get();
+  if (now - slot > 36e5 * 12 || (last && +last.v >= slot)) return;
+  db.prepare("insert into digest_state(k,v) values('telegram_last',?) on conflict(k) do update set v=excluded.v").run(String(now));
+  const items = digestGroups('daily').flatMap(g => g.items).sort((a, b) => b.rank - a.rank); if (!items.length) return;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text: digest.telegram(items, siteBase(), now), parse_mode: 'HTML', disable_web_page_preview: true }), signal: AbortSignal.timeout(15000) });
+    if (!r.ok) console.error('Telegram digest failed: HTTP', r.status);
+  } catch (e) { console.error('Telegram digest failed:', e.message); }
+}
+function serveUnsubscribe(res, q) {
+  const t = String(q.get('t') || ''), r = /^[a-f0-9]{32}$/.test(t) ? db.prepare("update digest_prefs set freq='off' where token=?").run(t) : { changes: 0 };
+  const msg = r.changes ? 'You will not get these emails any more. You can turn them back on any time in Signalstack, under You.' : 'This link is not valid any more. You can manage emails in Signalstack, under You.';
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
+  res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signalstack emails</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#07101f;color:#e6edf7;font:16px/1.5 system-ui,sans-serif"><main style="max-width:420px;padding:24px"><h1 style="font-size:22px;margin:0 0 8px">${r.changes ? 'Unsubscribed' : 'Link expired'}</h1><p style="color:#9fb0cc">${msg}</p><a href="/" style="color:#22d3ee">Back to Signalstack</a></main>`);
+}
+
 // Search: results grouped by type so the page can show Models, Companies, Papers, Signals and Benchmarks separately.
 get(/^\/api\/search$/, ({ q }) => {
   const t = (q.get('q') || '').trim().slice(0, 100); if (t.length < 2) return {};
@@ -417,10 +528,23 @@ get(/^\/api\/search$/, ({ q }) => {
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'), p = u.pathname, q = u.searchParams;
   const ip = (process.env.TRUST_PROXY === 'true' && String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()) || req.socket.remoteAddress;
+  if (p === '/digest/unsubscribe') { if (limited('unsub:' + ip, 30)) { res.writeHead(429); return res.end('Too many requests.'); } return serveUnsubscribe(res, q); }
+  if (p === '/digest/preview') {
+    // The email as it would arrive. It uses inline styles (as email must), so it gets its own policy and may be framed only by this site.
+    const sid = (req.headers.cookie || '').match(/sid=([a-f0-9]+)/)?.[1], ss = sid && db.prepare('select user_id from sessions where token=? and expires>?').get(sid, Date.now());
+    const h = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'" };
+    if (!ss) { res.writeHead(401, h); return res.end('Log in to preview.'); }
+    res.writeHead(200, h); return res.end(digestFor(ss.user_id, q.get('freq') === 'weekly' ? 'weekly' : 'daily').html);
+  }
+  if (p === '/feed.xml' || p === '/embed/now') {
+    if (limited('api:' + ip, 300)) { res.writeHead(429, { 'Content-Type': 'text/plain' }); return res.end('Too many requests. Wait a minute and try again.'); }
+    try { return servePublic(req, res, p, q); } catch (e) { console.error(e); res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end('Something went wrong.'); }
+  }
   if (!p.startsWith('/api')) {
     try { return serveStatic(req, res, p); } catch (e) { res.writeHead(400); return res.end('Bad request'); }
   }
-  if (limited('api:' + ip, 300)) return send(req, res, 429, { error: 'Too many requests. Wait a minute and try again.' });
+  if (req.method === 'OPTIONS' && p.startsWith('/api/v1')) { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Max-Age': '86400' }); return res.end(); }
+  if (limited('api:' + ip, 300)) return send(req, res, 429, { error: 'Too many requests. Wait a minute and try again.' }, p.startsWith('/api/v1') ? { 'Access-Control-Allow-Origin': '*' } : {});
   let body = '';
   req.on('data', c => { body += c; if (body.length > 1e5) req.destroy(); });
   req.on('end', async () => {
@@ -429,7 +553,7 @@ http.createServer((req, res) => {
       if (req.method === 'GET') {
         for (const [, re, fn] of routes) {
           const m = p.match(re); if (!m) continue;
-          return send(req, res, 200, await fn({ q, m }), PUBLIC_CACHE);
+          return send(req, res, 200, await fn({ q, m }), p.startsWith('/api/v1') ? { ...PUBLIC_CACHE, 'Access-Control-Allow-Origin': '*' } : PUBLIC_CACHE);
         }
       }
       const j = body ? JSON.parse(body) : {}, sid = (req.headers.cookie || '').match(/sid=([a-f0-9]+)/)?.[1];
@@ -488,6 +612,61 @@ http.createServer((req, res) => {
       const needAdmin = () => { if (!need()) return false; if (!isAdmin) { reply(403, { error: 'This area is for admins only.' }); return false; } return true; };
 
       // personal (login required)
+      // Collections: save signals, models and papers, and sort them into named lists.
+      if (p === '/api/collections' || p.startsWith('/api/saved')) {
+        if (!need()) return;
+        const SRC_LABEL = { huggingface: 'Hugging Face', openrouter: 'OpenRouter', curated: 'Official', arxiv: 'arXiv', 'github-release': 'GitHub', blog: 'Blog' };
+        const first = () => { let c = db.prepare('select id from collections where user_id=? order by id limit 1').get(uid); if (!c) c = { id: Number(db.prepare("insert into collections(user_id,name) values(?,'Saved')").run(uid).lastInsertRowid) }; return c.id; };
+        const mine = id => db.prepare('select id from collections where id=? and user_id=?').get(+id, uid);
+        const state = () => { first(); return { collections: db.prepare('select c.id,c.name,(select count(*) from saved s where s.collection_id=c.id) n from collections c where c.user_id=? order by c.id').all(uid),
+          saved: db.prepare("select distinct kind||'|'||ref k from saved where user_id=? limit 3000").all(uid).map(r => r.k) }; };
+        const snap = (kind, ref) => {
+          if (kind === 'signal') { const e = db.prepare(`select e.id,coalesce(e.title,e.summary) t,e.source,e.source_type from events e where e.id=? and ${EV_OK}`).get(+ref); return e && { title: e.t, url: e.source, source: SRC_LABEL[e.source_type] || 'Signal', ref: String(e.id) }; }
+          if (kind === 'model') { const m = db.prepare('select id,name,source_type from models where id=? and verified=1').get(ref); return m && { title: String(m.name).split('/').pop(), url: null, source: SRC_LABEL[m.source_type] || 'Model', ref: m.id }; }
+          if (kind === 'paper') { const x = db.prepare('select arxiv_id,id,title,url from papers where (arxiv_id=? or id=?) and verified=1').get(ref, ref); return x && { title: x.title, url: x.url, source: 'arXiv', ref: x.arxiv_id || x.id }; }
+          return null;
+        };
+        if (p === '/api/collections') {
+          if (req.method === 'POST') {
+            const name = String(j.name || '').trim().slice(0, 40); if (!name) return reply(400, { error: 'Give the collection a name.' });
+            if (db.prepare('select count(*) c from collections where user_id=?').get(uid).c >= 30) return reply(400, { error: 'You have reached 30 collections.' });
+            try { db.prepare('insert into collections(user_id,name) values(?,?)').run(uid, name); } catch (e) { return reply(400, { error: 'You already have a collection with that name.' }); }
+          } else if (req.method === 'DELETE') {
+            if (!mine(j.id)) return reply(404, { error: 'Collection not found.' });
+            if (+j.id === first()) return reply(400, { error: 'Your first collection cannot be deleted.' });
+            db.prepare('delete from collections where id=? and user_id=?').run(+j.id, uid);
+          }
+          return reply(200, state());
+        }
+        if (p === '/api/collections/rename' && req.method === 'POST') {
+          const name = String(j.name || '').trim().slice(0, 40); if (!name || !mine(j.id)) return reply(400, { error: 'Give the collection a name.' });
+          try { db.prepare('update collections set name=? where id=? and user_id=?').run(name, +j.id, uid); } catch (e) { return reply(400, { error: 'You already have a collection with that name.' }); }
+          return reply(200, state());
+        }
+        if (p === '/api/saved/where' && req.method === 'GET') return reply(200, { collections: db.prepare('select collection_id id from saved where user_id=? and kind=? and ref=?').all(uid, String(q.get('kind') || ''), String(q.get('ref') || '')).map(r => r.id) });
+        if (p === '/api/saved' && req.method === 'GET') {
+          const cid = q.get('collection') ? +q.get('collection') : first(); if (!mine(cid)) return reply(404, { error: 'Collection not found.' });
+          return reply(200, { collection: cid, items: db.prepare('select kind,ref,title,url,source,saved_at from saved where user_id=? and collection_id=? order by id desc limit 300').all(uid, cid) });
+        }
+        if (p === '/api/saved' && (req.method === 'POST' || req.method === 'DELETE')) {
+          const kind = String(j.kind || ''), ref = String(j.ref || '').slice(0, 200), cid = j.collection_id ? +j.collection_id : first();
+          if (!mine(cid)) return reply(404, { error: 'Collection not found.' });
+          if (req.method === 'POST') {
+            const sn = snap(kind, ref); if (!sn) return reply(404, { error: 'That item is no longer available.' });
+            if (db.prepare('select count(*) c from saved where user_id=?').get(uid).c >= 3000) return reply(400, { error: 'You have saved the maximum number of items.' });
+            db.prepare('insert or ignore into saved(user_id,collection_id,kind,ref,title,url,source) values(?,?,?,?,?,?,?)').run(uid, cid, kind, sn.ref, sn.title, sn.url, sn.source);
+          } else if (j.collection_id) db.prepare('delete from saved where user_id=? and collection_id=? and kind=? and ref=?').run(uid, cid, kind, ref);
+          else db.prepare('delete from saved where user_id=? and kind=? and ref=?').run(uid, kind, ref);
+          return reply(200, state());
+        }
+        if (p === '/api/saved/move' && req.method === 'POST') {
+          if (!mine(j.from) || !mine(j.to)) return reply(404, { error: 'Collection not found.' });
+          db.prepare('update or ignore saved set collection_id=? where user_id=? and collection_id=? and kind=? and ref=?').run(+j.to, uid, +j.from, String(j.kind), String(j.ref));
+          db.prepare('delete from saved where user_id=? and collection_id=? and kind=? and ref=?').run(uid, +j.from, String(j.kind), String(j.ref));
+          return reply(200, state());
+        }
+        return reply(404, { error: 'Not found.' });
+      }
       // Follow a lab or a model series; the Now page shows what is new from everything you follow or watch.
       if (p === '/api/follows') {
         if (!need()) return;
@@ -504,17 +683,33 @@ http.createServer((req, res) => {
       }
       if (p === '/api/watching') {
         if (!need()) return;
-        const fol = db.prepare('select kind,key from follows where user_id=?').all(uid), watched = new Set(db.prepare('select model_id from watchlist where user_id=?').all(uid).map(r => r.model_id));
-        const labs = new Map(fol.filter(f => f.kind === 'lab' && byId(f.key)).map(f => [f.key, byId(f.key).name])), fam = new Map(), famLabel = new Map();
-        for (const f of fol.filter(x => x.kind === 'family')) {
-          const g = seriesOf(labRows(f.key.split(':')[0])).find(x => x.key === f.key); if (!g) continue;
-          famLabel.set(f.key, `${byId(g.company_id).name} ${g.label}`); g.models.forEach(mm => fam.set(mm.id, f.key));
+        return reply(200, watchingFor(uid, 8));
+      }
+      // Email digest preferences, a preview of what would be sent, and a "send me one now" test (limited to a few per hour).
+      if (p === '/api/digest') {
+        if (!need()) return;
+        if (req.method === 'POST') {
+          const freq = ['off', 'daily', 'weekly'].includes(j.freq) ? j.freq : 'off', hour = Math.min(Math.max(parseInt(j.hour, 10) || 0, 0), 23), tz = Math.min(Math.max(parseInt(j.tz_offset, 10) || 0, -720), 840);
+          // last_sent is stamped now, so turning the digest on never sends one immediately; the first one arrives at the next chosen hour.
+          db.prepare("insert into digest_prefs(user_id,freq,hour,tz_offset,last_sent,token) values(?,?,?,?,datetime('now'),?) on conflict(user_id) do update set freq=excluded.freq,hour=excluded.hour,tz_offset=excluded.tz_offset,last_sent=case when digest_prefs.freq=excluded.freq then digest_prefs.last_sent else excluded.last_sent end")
+            .run(uid, freq, hour, tz, cr.randomBytes(16).toString('hex'));
+          db.prepare('update digest_prefs set token=coalesce(nullif(token,\'\'),?) where user_id=?').run(cr.randomBytes(16).toString('hex'), uid);
         }
-        const pool = signals(new URLSearchParams('window=30d')).map(sg => {
-          const because = watched.has(sg.model_id) ? 'You watch this model' : fam.has(sg.model_id) ? `You follow ${famLabel.get(fam.get(sg.model_id))}` : labs.has(sg.company_id) ? `You follow ${labs.get(sg.company_id)}` : null;
-          return because ? { ...sg, because } : null;
-        }).filter(Boolean);
-        return reply(200, { items: ranked(pool).slice(0, 8), total: pool.length, follows: { labs: [...labs].map(([id, name]) => ({ id, name })), families: [...famLabel].map(([key, label]) => ({ key, label })), models: watched.size } });
+        const pr = db.prepare('select freq,hour,tz_offset from digest_prefs where user_id=?').get(uid) || { freq: 'off', hour: 8, tz_offset: 0 };
+        return reply(200, { ...pr, emailConfigured: !!process.env.RESEND_API_KEY, telegram: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) });
+      }
+      if (p === '/api/digest/preview') {
+        if (!need()) return;
+        const d = digestFor(uid, j.freq === 'weekly' || q.get('freq') === 'weekly' ? 'weekly' : 'daily');
+        return reply(200, { subject: d.subject, html: d.html, count: d.count });
+      }
+      if (p === '/api/digest/test' && req.method === 'POST') {
+        if (!need()) return;
+        if (limited('digest-test:' + uid, 3, 36e5)) return reply(429, { error: 'You can send up to 3 test emails an hour. Try again later.' });
+        if (!process.env.RESEND_API_KEY) return reply(400, { error: 'Email is not set up on this server yet, so a test cannot be sent. The preview shows what it would look like.' });
+        if (!db.prepare('select token from digest_prefs where user_id=?').get(uid)) db.prepare("insert into digest_prefs(user_id,freq,token) values(?,'off',?)").run(uid, cr.randomBytes(16).toString('hex'));
+        const r = await sendDigest(uid, j.freq === 'weekly' ? 'weekly' : 'daily', { force: true });
+        return reply(r.ok ? 200 : 502, r.ok ? { ok: true } : { error: 'The email could not be sent: ' + r.error });
       }
       if (p === '/api/watchlist') {
         if (!need()) return;
@@ -622,7 +817,7 @@ http.createServer((req, res) => {
       }
       reply(404, { error: 'Endpoint not found.' });
     } catch (e) {
-      if (e.code && typeof e.code === 'number') return send(req, res, e.code, { error: e.message });
+      if (e.code && typeof e.code === 'number') return send(req, res, e.code, { error: e.message }, p.startsWith('/api/v1') ? { 'Access-Control-Allow-Origin': '*' } : {});
       if (e instanceof SyntaxError) return send(req, res, 400, { error: 'Request could not be read.' });
       console.error(e);
       send(req, res, 500, { error: 'Something went wrong on our side. Try again shortly.' });
@@ -631,6 +826,7 @@ http.createServer((req, res) => {
 }).listen(PORT, () => {
   console.log('Signalstack running at http://localhost:' + PORT);
   if (process.env.DISABLE_INGEST !== 'true') scheduleIngestion();
+  if (process.env.DISABLE_DIGEST !== 'true' && process.env.DISABLE_INGEST !== 'true') { setTimeout(digestTick, 30000).unref(); setInterval(digestTick, 10 * 60000).unref(); } // checked often, so a server that wakes late still sends
 });
 
 async function ingestOnce() {

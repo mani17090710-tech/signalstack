@@ -212,3 +212,14 @@ SignalStack does **not** claim to list every AI model or paper. It covers:
   page. A similar name never creates a link.
 - **Not built yet:** benchmark scores (the tables exist but stay hidden until a reliable, attributable source is
   connected) and AI explanations. The site works fully without any LLM API key.
+
+## Email and Telegram digests
+
+- **Email digest** (daily, or every Monday): people choose it under You, Email digest, with a live preview and a test send. It needs `RESEND_API_KEY` (and optionally `RESEND_FROM`). Every email has a one-click unsubscribe link.
+- **Telegram**: one daily post to a channel or group. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (add the bot to the channel as an admin). `TELEGRAM_HOUR_UTC` picks the hour (default 4).
+- Set `PUBLIC_URL` (or rely on Render's `RENDER_EXTERNAL_URL`) so links in emails are absolute.
+- The scheduler checks every 10 minutes and sends a missed digest once the server wakes up (free hosting sleeps), so it may arrive late but is never sent twice. `DISABLE_DIGEST=true` turns it off.
+
+## Phones
+
+The header search collapses to an icon, touch devices get a "Quick look" button that opens the model preview as a bottom sheet, and the site can be added to the home screen (web app manifest and icons; no service worker, so it still needs a connection).

@@ -1,5 +1,5 @@
 // Research: papers from arXiv, with the labs they mention and the source on each. Same card design as the signal feed.
-import { api, html, pageHead, empty, skeleton, mount, $, stamp, ago, verBadge, safeUrl, checked } from '../lib.js';
+import { api, html, pageHead, empty, skeleton, mount, $, stamp, ago, verBadge, safeUrl, checked, saveBtn } from '../lib.js';
 
 let COMPANY_NAMES = {};
 const f = { q: '', company: '', window: '' };
@@ -13,7 +13,7 @@ const paper = p => html`<article class="sig src-arx">
   ${p.authors ? html`<p class="sc-sum sc-au">${p.authors}</p>` : ''}
   <div class="sc-meta">${p.categories.map(c => html`<span class="tag">${c}</span>`)}${p.entities.map(c => html`<a class="tag co" href="#company/${c}">${COMPANY_NAMES[c] || c}</a>`)}${verBadge(p.verification)}</div>
   ${p.summary ? html`<details class="why"><summary>Abstract</summary><p class="detail">${p.summary}</p>${p.abstract_truncated ? html`<p class="fine">Shortened in our records. Open the paper on arXiv for the full abstract.</p>` : ''}</details>` : ''}
-  <div class="sc-act">${safeUrl(p.url) ? html`<a class="btn-src" href="${p.url}" target="_blank" rel="noopener noreferrer">Open on arXiv <span aria-hidden="true">↗</span></a>` : ''}<span class="sc-fine">${p.source_role === 'primary' ? 'Primary record from arXiv' : 'Secondary source'}${p.last_checked || p.retrieved_at ? ` · checked ${ago(p.last_checked || p.retrieved_at)}` : ''}</span></div></article>`;
+  <div class="sc-act">${safeUrl(p.url) ? html`<a class="btn-src" href="${p.url}" target="_blank" rel="noopener noreferrer">Open on arXiv <span aria-hidden="true">↗</span></a>` : ''}${saveBtn('paper', p.arxiv_id)}<span class="sc-fine">${p.source_role === 'primary' ? 'Primary record from arXiv' : 'Secondary source'}${p.last_checked || p.retrieved_at ? ` · checked ${ago(p.last_checked || p.retrieved_at)}` : ''}</span></div></article>`;
 
 export async function render() {
   return {

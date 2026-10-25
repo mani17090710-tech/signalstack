@@ -1,0 +1,11 @@
+/* The embeddable widget. Self-contained: system fonts, no external requests. */
+:root { --bg: #0b1325; --ink: #e7eefc; --mut: #8d9dbd; --line: #1b2a4a; --cy: #35d4f4; --chip: #101a31; }
+[data-theme="light"] { --bg: #ffffff; --ink: #0d1730; --mut: #5b6a86; --line: #dbe3f0; --cy: #0a7ea4; --chip: #eef3fa; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 14px 16px; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+h1 { margin: 0 0 10px; font-size: 16px; }
+ol { list-style: none; margin: 0; padding: 0; } li { padding: 10px 0; border-top: 1px solid var(--line); } li:first-child { border-top: 0; }
+a { color: var(--cy); text-decoration: none; } a:hover { text-decoration: underline; } .t { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; } .t:hover { color: var(--cy); }
+.m { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; font-size: 12.5px; color: var(--mut); }
+.b { background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; color: var(--ink); }
+.none, .by { color: var(--mut); font-size: 12.5px; } .by { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }

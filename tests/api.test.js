@@ -155,3 +155,66 @@ test('following labs and series is private and feeds the Watching list', async (
   r = await (await post('/api/follows', { kind: 'lab', key: 'qwen' }, cookie, 'DELETE')).json();
   assert.deepStrictEqual(r, [{ kind: 'family', key: 'qwen:qwen' }]);
 });
+
+test('collections: save, organise, and keep a snapshot; important signals carry a plain "why this matters" note', async () => {
+  const base = `http://127.0.0.1:${port}`, call = async (path, method, body, cookie) => { const r = await fetch(base + path, { method, headers: { cookie }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => ({})), headers: r.headers }; };
+  assert.strictEqual((await call('/api/collections', 'GET')).status, 401);
+  const cookie = (await fetch(base + '/api/login', { method: 'POST', body: JSON.stringify({ email: 'a@b.co', password: 'longenough' }) })).headers.get('set-cookie').split(';')[0];
+  let r = (await call('/api/collections', 'GET', null, cookie)).body;
+  assert.strictEqual(r.collections.length, 1); const first = r.collections[0].id;
+  const sig = (await api('/api/signals?window=30d')).body.items[0];
+  r = (await call('/api/saved', 'POST', { kind: 'signal', ref: String(sig.id) }, cookie)).body;
+  assert.ok(r.saved.includes('signal|' + sig.id));
+  r = (await call('/api/saved', 'POST', { kind: 'model', ref: 'hf:Qwen/Qwen3-8B' }, cookie)).body;
+  assert.strictEqual(r.collections[0].n, 2);
+  assert.strictEqual((await call('/api/saved', 'POST', { kind: 'model', ref: 'hf:nope/none' }, cookie)).status, 404, 'unknown items cannot be saved');
+  const nc = (await call('/api/collections', 'POST', { name: 'To read' }, cookie)).body.collections.find(c => c.name === 'To read').id;
+  assert.strictEqual((await call('/api/collections', 'POST', { name: 'To read' }, cookie)).status, 400, 'names are unique');
+  await call('/api/saved/move', 'POST', { kind: 'model', ref: 'hf:Qwen/Qwen3-8B', from: first, to: nc }, cookie);
+  const inNew = (await call('/api/saved?collection=' + nc, 'GET', null, cookie)).body.items;
+  assert.deepStrictEqual(inNew.map(i => [i.kind, i.ref, i.title]), [['model', 'hf:Qwen/Qwen3-8B', 'Qwen3-8B']]);
+  assert.strictEqual((await call('/api/collections', 'DELETE', { id: first }, cookie)).status, 400, 'the first collection stays');
+  assert.strictEqual((await call('/api/collections', 'DELETE', { id: nc }, cookie)).status, 200);
+  const imp = (await api('/api/signals?window=30d')).body.items.filter(s => s.score >= 60);
+  assert.ok(imp.length && imp.every(s => s.matters === null || (typeof s.matters === 'string' && s.matters.length > 20)));
+  assert.ok((await api('/api/signals?window=30d')).body.items.filter(s => s.score < 60).every(s => s.matters === null), 'no note on minor signals');
+});
+
+test('public API v1, RSS feed and embeddable widget', async () => {
+  const base = `http://127.0.0.1:${port}`;
+  const s = await fetch(base + '/api/v1/signals?window=30d&limit=3');
+  assert.strictEqual(s.headers.get('access-control-allow-origin'), '*');
+  const sb = await s.json();
+  assert.ok(sb.data.length && sb.meta.attribution && sb.meta.total >= sb.data.length);
+  assert.ok(sb.data.every(x => x.source && 'verification' in x.source && x.type && x.published_at && !('detail' in x)), 'stable public shape');
+  const m = (await (await fetch(base + '/api/v1/models?limit=2')).json());
+  assert.ok(m.data.length && m.data[0].access && 'parameters' in m.data[0]);
+  assert.strictEqual((await fetch(base + '/api/v1/signals', { method: 'OPTIONS' })).status, 204);
+  assert.ok((await (await fetch(base + '/api/v1/labs')).json()).data.some(c => c.id === 'openai'));
+  const feed = await fetch(base + '/feed.xml?window=30d');
+  assert.match(feed.headers.get('content-type'), /rss\+xml/);
+  const xmlText = await feed.text(); assert.match(xmlText, /^<\?xml/); assert.ok((xmlText.match(/<item>/g) || []).length >= 1);
+  const w = await fetch(base + '/embed/now?limit=3&theme=light');
+  assert.strictEqual(w.headers.get('x-frame-options'), null, 'the widget may be framed');
+  assert.match(w.headers.get('content-security-policy'), /frame-ancestors \*/); assert.match(w.headers.get('content-security-policy'), /default-src 'none'/);
+  const wh = await w.text(); assert.match(wh, /Powered by/); assert.doesNotMatch(wh, /<script/i);
+  const app = await fetch(base + '/'); assert.strictEqual(app.headers.get('x-frame-options'), 'DENY', 'the app itself still cannot be framed');
+});
+
+test('email digest: preferences, preview, one-click unsubscribe, and a test send that needs email to be set up', async () => {
+  const base = `http://127.0.0.1:${port}`, call = async (path, method, body, cookie) => { const r = await fetch(base + path, { method, headers: { cookie }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  assert.strictEqual((await call('/api/digest', 'GET')).status, 401);
+  const cookie = (await fetch(base + '/api/login', { method: 'POST', body: JSON.stringify({ email: 'a@b.co', password: 'longenough' }) })).headers.get('set-cookie').split(';')[0];
+  assert.strictEqual((await call('/api/digest', 'GET', null, cookie)).body.freq, 'off');
+  let r = (await call('/api/digest', 'POST', { freq: 'weekly', hour: 99, tz_offset: 330 }, cookie)).body;
+  assert.deepStrictEqual([r.freq, r.hour, r.tz_offset, r.emailConfigured], ['weekly', 23, 330, false], 'values are clamped; email reports whether it is set up');
+  assert.strictEqual((await call('/api/digest', 'POST', { freq: 'hourly' }, cookie)).body.freq, 'off', 'unknown frequencies turn it off');
+  const pv = (await call('/api/digest/preview?freq=daily', 'GET', null, cookie)).body;
+  assert.match(pv.subject, /^Today in AI/); assert.match(pv.html, /Stop these emails/); assert.match(pv.html, /unsubscribe\?t=[a-f0-9]{32}/);
+  assert.strictEqual((await call('/api/digest/test', 'POST', {}, cookie)).status, 400, 'no email key: says so instead of pretending');
+  const tok = pv.html.match(/unsubscribe\?t=([a-f0-9]{32})/)[1];
+  await call('/api/digest', 'POST', { freq: 'daily', hour: 8, tz_offset: 0 }, cookie);
+  const un = await fetch(base + '/digest/unsubscribe?t=' + tok); assert.strictEqual(un.status, 200); assert.match(await un.text(), /Unsubscribed/);
+  assert.strictEqual((await call('/api/digest', 'GET', null, cookie)).body.freq, 'off');
+  assert.match(await (await fetch(base + '/digest/unsubscribe?t=bad')).text(), /Link expired/);
+});
