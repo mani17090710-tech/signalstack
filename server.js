@@ -13,6 +13,7 @@ const { CATEGORY_LABELS } = require('./lib/classify');
 const { seriesOf } = require('./lib/family');
 const { matters } = require('./lib/matters');
 const pub = require('./lib/publicapi');
+const digest = require('./lib/digest');
 const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, enrichModel } = require('./ingest');
@@ -38,7 +39,7 @@ function limited(key, max, ms = 60000) {
   a.push(n); buckets.set(key, a);
   return a.length > max;
 }
-setInterval(() => { const n = Date.now(); for (const [k, a] of buckets) if (!a.some(t => n - t < 60000)) buckets.delete(k); }, 300000).unref();
+setInterval(() => { const n = Date.now(); for (const [k, a] of buckets) if (!a.some(t => n - t < 36e5)) buckets.delete(k); }, 300000).unref();
 
 const SECURITY = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'X-Frame-Options': 'DENY',
@@ -209,6 +210,21 @@ function ranked(list) {
   }
   return out;
 }
+// What is new from the labs, series and models a person follows or watches (shared by the Now page and the digest).
+function watchingFor(uid, limit, windowDays = 30) {
+  const fol = db.prepare('select kind,key from follows where user_id=?').all(uid), watched = new Set(db.prepare('select model_id from watchlist where user_id=?').all(uid).map(r => r.model_id));
+  const labs = new Map(fol.filter(f => f.kind === 'lab' && byId(f.key)).map(f => [f.key, byId(f.key).name])), fam = new Map(), famLabel = new Map();
+  for (const f of fol.filter(x => x.kind === 'family')) {
+    const g = seriesOf(labRows(f.key.split(':')[0])).find(x => x.key === f.key); if (!g) continue;
+    famLabel.set(f.key, `${byId(g.company_id).name} ${g.label}`); g.models.forEach(mm => fam.set(mm.id, f.key));
+  }
+  const pool = signals(new URLSearchParams('window=' + windowDays + 'd')).map(sg => {
+    const because = watched.has(sg.model_id) ? 'You watch this model' : fam.has(sg.model_id) ? `You follow ${famLabel.get(fam.get(sg.model_id))}` : labs.has(sg.company_id) ? `You follow ${labs.get(sg.company_id)}` : null;
+    return because ? { ...sg, because } : null;
+  }).filter(Boolean);
+  return { items: ranked(pool).slice(0, limit), total: pool.length, follows: { labs: [...labs].map(([id, name]) => ({ id, name })), families: [...famLabel].map(([key, label]) => ({ key, label })), models: watched.size } };
+}
+
 get(/^\/api\/now$/, () => {
   const day = signals(new URLSearchParams('window=24h')), week = signals(new URLSearchParams('window=7d'));
   const pool = day.length >= 5 ? day : week;
@@ -439,6 +455,57 @@ function servePublic(req, res, p, q) {
   res.end(pub.embedHtml(items, { base, title: 'AI right now', theme: q.get('theme') }));
 }
 
+// ---------- digests (email per person, Telegram per channel) ----------
+const siteBase = () => (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT).replace(/\/$/, '');
+const digestGroups = (freq, skip = new Set()) => {
+  const win = freq === 'weekly' ? '7d' : '24h', pool = signals(new URLSearchParams('window=' + win)), use = pool.length >= 5 || freq === 'weekly' ? pool : signals(new URLSearchParams('window=7d'));
+  return NOW_GROUPS.map(([, label, cats, n]) => ({ label, items: ranked(use.filter(x => cats.includes(x.cat) && x.score >= SIGNIFICANT - 20 && !skip.has(x.id))).slice(0, Math.min(n, 3)) }));
+};
+function digestFor(uid, freq) {
+  const u = db.prepare('select name from users where id=?').get(uid) || {}, pr = db.prepare('select token from digest_prefs where user_id=?').get(uid) || {};
+  const watch = watchingFor(uid, 4, freq === 'weekly' ? 7 : 2).items;
+  const groups = digestGroups(freq, new Set(watch.map(x => x.id)));
+  return { ...digest.build({ freq, groups, watching: watch, base: siteBase(), unsubscribeUrl: `${siteBase()}/digest/unsubscribe?t=${pr.token || ''}`, name: u.name || '' }) };
+}
+async function sendDigest(uid, freq, { force = false } = {}) {
+  const u = db.prepare('select email from users where id=?').get(uid); if (!u) return { ok: false, error: 'No such account.' };
+  const d = digestFor(uid, freq); if (!d.count && !force) return { ok: true, skipped: true };
+  const tok = db.prepare('select token from digest_prefs where user_id=?').get(uid)?.token;
+  return sendMail({ to: u.email, subject: d.subject, text: d.text, html: d.html, headers: tok ? { 'List-Unsubscribe': `<${siteBase()}/digest/unsubscribe?t=${tok}>` } : undefined });
+}
+async function digestTick() {
+  try {
+    const now = Date.now();
+    for (const pr of db.prepare("select * from digest_prefs where freq in ('daily','weekly')").all()) {
+      if (!digest.due(pr, now)) continue;
+      // Stamp first, so a slow or failing send is never repeated every tick; a failure is logged and the next slot tries again.
+      db.prepare("update digest_prefs set last_sent=datetime('now') where user_id=?").run(pr.user_id);
+      const r = await sendDigest(pr.user_id, pr.freq);
+      db.prepare('insert into notification_log(user_id,channel,status,error) values(?,?,?,?)').run(pr.user_id, 'digest', r.ok ? (r.skipped ? 'skipped' : 'sent') : 'failed', r.error || null);
+    }
+    await telegramTick(now);
+  } catch (e) { console.error('Digest run failed:', e.message); }
+}
+// One daily post to a Telegram channel or group, only when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set. TELEGRAM_HOUR_UTC picks the hour (default 4).
+async function telegramTick(now) {
+  const tok = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID; if (!tok || !chat) return;
+  const hour = Math.min(Math.max(+process.env.TELEGRAM_HOUR_UTC || 4, 0), 23), slot = digest.lastSlot({ freq: 'daily', hour, tz_offset: 0 }, now);
+  const last = db.prepare("select v from digest_state where k='telegram_last'").get();
+  if (now - slot > 36e5 * 12 || (last && +last.v >= slot)) return;
+  db.prepare("insert into digest_state(k,v) values('telegram_last',?) on conflict(k) do update set v=excluded.v").run(String(now));
+  const items = digestGroups('daily').flatMap(g => g.items).sort((a, b) => b.rank - a.rank); if (!items.length) return;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text: digest.telegram(items, siteBase(), now), parse_mode: 'HTML', disable_web_page_preview: true }), signal: AbortSignal.timeout(15000) });
+    if (!r.ok) console.error('Telegram digest failed: HTTP', r.status);
+  } catch (e) { console.error('Telegram digest failed:', e.message); }
+}
+function serveUnsubscribe(res, q) {
+  const t = String(q.get('t') || ''), r = /^[a-f0-9]{32}$/.test(t) ? db.prepare("update digest_prefs set freq='off' where token=?").run(t) : { changes: 0 };
+  const msg = r.changes ? 'You will not get these emails any more. You can turn them back on any time in Signalstack, under You.' : 'This link is not valid any more. You can manage emails in Signalstack, under You.';
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
+  res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signalstack emails</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#07101f;color:#e6edf7;font:16px/1.5 system-ui,sans-serif"><main style="max-width:420px;padding:24px"><h1 style="font-size:22px;margin:0 0 8px">${r.changes ? 'Unsubscribed' : 'Link expired'}</h1><p style="color:#9fb0cc">${msg}</p><a href="/" style="color:#22d3ee">Back to Signalstack</a></main>`);
+}
+
 // Search: results grouped by type so the page can show Models, Companies, Papers, Signals and Benchmarks separately.
 get(/^\/api\/search$/, ({ q }) => {
   const t = (q.get('q') || '').trim().slice(0, 100); if (t.length < 2) return {};
@@ -461,6 +528,7 @@ get(/^\/api\/search$/, ({ q }) => {
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'), p = u.pathname, q = u.searchParams;
   const ip = (process.env.TRUST_PROXY === 'true' && String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()) || req.socket.remoteAddress;
+  if (p === '/digest/unsubscribe') { if (limited('unsub:' + ip, 30)) { res.writeHead(429); return res.end('Too many requests.'); } return serveUnsubscribe(res, q); }
   if (p === '/feed.xml' || p === '/embed/now') {
     if (limited('api:' + ip, 300)) { res.writeHead(429, { 'Content-Type': 'text/plain' }); return res.end('Too many requests. Wait a minute and try again.'); }
     try { return servePublic(req, res, p, q); } catch (e) { console.error(e); res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end('Something went wrong.'); }
@@ -608,17 +676,33 @@ http.createServer((req, res) => {
       }
       if (p === '/api/watching') {
         if (!need()) return;
-        const fol = db.prepare('select kind,key from follows where user_id=?').all(uid), watched = new Set(db.prepare('select model_id from watchlist where user_id=?').all(uid).map(r => r.model_id));
-        const labs = new Map(fol.filter(f => f.kind === 'lab' && byId(f.key)).map(f => [f.key, byId(f.key).name])), fam = new Map(), famLabel = new Map();
-        for (const f of fol.filter(x => x.kind === 'family')) {
-          const g = seriesOf(labRows(f.key.split(':')[0])).find(x => x.key === f.key); if (!g) continue;
-          famLabel.set(f.key, `${byId(g.company_id).name} ${g.label}`); g.models.forEach(mm => fam.set(mm.id, f.key));
+        return reply(200, watchingFor(uid, 8));
+      }
+      // Email digest preferences, a preview of what would be sent, and a "send me one now" test (limited to a few per hour).
+      if (p === '/api/digest') {
+        if (!need()) return;
+        if (req.method === 'POST') {
+          const freq = ['off', 'daily', 'weekly'].includes(j.freq) ? j.freq : 'off', hour = Math.min(Math.max(parseInt(j.hour, 10) || 0, 0), 23), tz = Math.min(Math.max(parseInt(j.tz_offset, 10) || 0, -720), 840);
+          // last_sent is stamped now, so turning the digest on never sends one immediately; the first one arrives at the next chosen hour.
+          db.prepare("insert into digest_prefs(user_id,freq,hour,tz_offset,last_sent,token) values(?,?,?,?,datetime('now'),?) on conflict(user_id) do update set freq=excluded.freq,hour=excluded.hour,tz_offset=excluded.tz_offset,last_sent=case when digest_prefs.freq=excluded.freq then digest_prefs.last_sent else excluded.last_sent end")
+            .run(uid, freq, hour, tz, cr.randomBytes(16).toString('hex'));
+          db.prepare('update digest_prefs set token=coalesce(nullif(token,\'\'),?) where user_id=?').run(cr.randomBytes(16).toString('hex'), uid);
         }
-        const pool = signals(new URLSearchParams('window=30d')).map(sg => {
-          const because = watched.has(sg.model_id) ? 'You watch this model' : fam.has(sg.model_id) ? `You follow ${famLabel.get(fam.get(sg.model_id))}` : labs.has(sg.company_id) ? `You follow ${labs.get(sg.company_id)}` : null;
-          return because ? { ...sg, because } : null;
-        }).filter(Boolean);
-        return reply(200, { items: ranked(pool).slice(0, 8), total: pool.length, follows: { labs: [...labs].map(([id, name]) => ({ id, name })), families: [...famLabel].map(([key, label]) => ({ key, label })), models: watched.size } });
+        const pr = db.prepare('select freq,hour,tz_offset from digest_prefs where user_id=?').get(uid) || { freq: 'off', hour: 8, tz_offset: 0 };
+        return reply(200, { ...pr, emailConfigured: !!process.env.RESEND_API_KEY, telegram: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) });
+      }
+      if (p === '/api/digest/preview') {
+        if (!need()) return;
+        const d = digestFor(uid, j.freq === 'weekly' || q.get('freq') === 'weekly' ? 'weekly' : 'daily');
+        return reply(200, { subject: d.subject, html: d.html, count: d.count });
+      }
+      if (p === '/api/digest/test' && req.method === 'POST') {
+        if (!need()) return;
+        if (limited('digest-test:' + uid, 3, 36e5)) return reply(429, { error: 'You can send up to 3 test emails an hour. Try again later.' });
+        if (!process.env.RESEND_API_KEY) return reply(400, { error: 'Email is not set up on this server yet, so a test cannot be sent. The preview shows what it would look like.' });
+        if (!db.prepare('select token from digest_prefs where user_id=?').get(uid)) db.prepare("insert into digest_prefs(user_id,freq,token) values(?,'off',?)").run(uid, cr.randomBytes(16).toString('hex'));
+        const r = await sendDigest(uid, j.freq === 'weekly' ? 'weekly' : 'daily', { force: true });
+        return reply(r.ok ? 200 : 502, r.ok ? { ok: true } : { error: 'The email could not be sent: ' + r.error });
       }
       if (p === '/api/watchlist') {
         if (!need()) return;
@@ -735,6 +819,7 @@ http.createServer((req, res) => {
 }).listen(PORT, () => {
   console.log('Signalstack running at http://localhost:' + PORT);
   if (process.env.DISABLE_INGEST !== 'true') scheduleIngestion();
+  if (process.env.DISABLE_DIGEST !== 'true' && process.env.DISABLE_INGEST !== 'true') { setTimeout(digestTick, 30000).unref(); setInterval(digestTick, 10 * 60000).unref(); } // checked often, so a server that wakes late still sends
 });
 
 async function ingestOnce() {

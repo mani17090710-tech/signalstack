@@ -200,3 +200,21 @@ test('public API v1, RSS feed and embeddable widget', async () => {
   const wh = await w.text(); assert.match(wh, /Powered by/); assert.doesNotMatch(wh, /<script/i);
   const app = await fetch(base + '/'); assert.strictEqual(app.headers.get('x-frame-options'), 'DENY', 'the app itself still cannot be framed');
 });
+
+test('email digest: preferences, preview, one-click unsubscribe, and a test send that needs email to be set up', async () => {
+  const base = `http://127.0.0.1:${port}`, call = async (path, method, body, cookie) => { const r = await fetch(base + path, { method, headers: { cookie }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  assert.strictEqual((await call('/api/digest', 'GET')).status, 401);
+  const cookie = (await fetch(base + '/api/login', { method: 'POST', body: JSON.stringify({ email: 'a@b.co', password: 'longenough' }) })).headers.get('set-cookie').split(';')[0];
+  assert.strictEqual((await call('/api/digest', 'GET', null, cookie)).body.freq, 'off');
+  let r = (await call('/api/digest', 'POST', { freq: 'weekly', hour: 99, tz_offset: 330 }, cookie)).body;
+  assert.deepStrictEqual([r.freq, r.hour, r.tz_offset, r.emailConfigured], ['weekly', 23, 330, false], 'values are clamped; email reports whether it is set up');
+  assert.strictEqual((await call('/api/digest', 'POST', { freq: 'hourly' }, cookie)).body.freq, 'off', 'unknown frequencies turn it off');
+  const pv = (await call('/api/digest/preview?freq=daily', 'GET', null, cookie)).body;
+  assert.match(pv.subject, /^Today in AI/); assert.match(pv.html, /Stop these emails/); assert.match(pv.html, /unsubscribe\?t=[a-f0-9]{32}/);
+  assert.strictEqual((await call('/api/digest/test', 'POST', {}, cookie)).status, 400, 'no email key: says so instead of pretending');
+  const tok = pv.html.match(/unsubscribe\?t=([a-f0-9]{32})/)[1];
+  await call('/api/digest', 'POST', { freq: 'daily', hour: 8, tz_offset: 0 }, cookie);
+  const un = await fetch(base + '/digest/unsubscribe?t=' + tok); assert.strictEqual(un.status, 200); assert.match(await un.text(), /Unsubscribed/);
+  assert.strictEqual((await call('/api/digest', 'GET', null, cookie)).body.freq, 'off');
+  assert.match(await (await fetch(base + '/digest/unsubscribe?t=bad')).text(), /Link expired/);
+});
