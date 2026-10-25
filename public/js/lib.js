@@ -32,7 +32,9 @@ export async function api(p, method = 'GET', body) {
   }
 }
 
-export const state = { me: null, watch: [], status: { counts: {} } };
+export const state = { me: null, watch: [], follows: [], status: { counts: {} }, whoReady: Promise.resolve() };
+// Follow / Following toggle for a lab (kind 'lab', key = lab id) or a model series (kind 'family', key = 'lab:series'). main.js handles the click.
+export const followBtn = (kind, key, big = false) => { const on = state.follows.some(f => f.kind === kind && f.key === key); return html`<button class="follow ${big ? 'pri' : ''} ${on ? 'on' : ''}" data-follow="${kind}|${key}" aria-pressed="${on}">${on ? 'Following' : 'Follow'}</button>`; };
 
 // ---------- formatting ----------
 export const num = n => { n = +n || 0; return n >= 1e9 ? (n / 1e9).toFixed(1).replace('.0', '') + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1).replace('.0', '') + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.0', '') + 'k' : String(n); };
@@ -103,6 +105,31 @@ export const sourceInfo = s => { const k = SRC[s.source_type]; return [k ? k[0] 
 // Release notes and abstracts can carry markdown; show them as plain sentences.
 const plain = t => String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_>#]+/g, ' ').replace(/\s+/g, ' ').trim();
 
+// ---------- source provenance ----------
+// Says exactly where a signal comes from and how far that source can be trusted, using only what was stored: the source type, the verification
+// status the ingester assigned, whether a tracked lab is attached, and whether the link is on that lab's own domain. Nothing is inferred beyond that.
+export const provenance = s => {
+  const url = safeUrl(s.url), lab = s.company_id, own = !!s.official_domain, v = s.verification;
+  let title, note, tone = 'plain';
+  switch (s.source_type) {
+    case 'curated': title = v === 'verified' ? 'Verified from official release' : 'From the official release list'; note = 'Listed in the hand-kept list of official releases'; tone = v === 'verified' ? 'ok' : 'blue'; break;
+    case 'arxiv': title = 'Primary record from arXiv'; note = 'Taken from arXiv itself'; tone = 'ok'; break;
+    case 'github-release': title = lab ? 'Official release on GitHub' : 'Release published on GitHub'; note = lab ? `From ${s.company}’s own GitHub account` : 'From a repository we track; not matched to a lab'; tone = lab ? 'ok' : 'plain'; break;
+    case 'huggingface': title = lab && v === 'source_verified' ? 'From the lab’s own Hugging Face account' : 'Community upload on Hugging Face'; note = lab && v === 'source_verified' ? 'Published by the lab itself; not yet matched to its official documentation' : 'Not from a tracked lab'; tone = lab && v === 'source_verified' ? 'blue' : 'plain'; break;
+    case 'openrouter': title = 'Listed in the OpenRouter catalogue'; note = 'A third-party catalogue. The provider has not confirmed it here'; tone = 'warn'; break;
+    case 'blog': title = own ? `Official announcement from ${s.company || 'the lab'}` : v === 'verified' ? 'Official announcement' : 'Post from a tracked feed'; note = own ? 'Published on the lab’s own website' : 'Not on a lab’s own domain'; tone = own ? 'ok' : 'plain'; break;
+    default: title = (VER[v] || VER.unverified)[1]; note = ''; tone = v === 'verified' ? 'ok' : 'plain';
+  }
+  let shown = '';
+  if (url) { try { const u = new URL(url); shown = u.hostname.replace(/^www\./, '') + (u.pathname + u.search).replace(/\/$/, ''); } catch (e) { shown = url; } }
+  return { title, note, tone, url, shown };
+};
+const PROV_ICON = { ok: '<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5L15.5 10"/>', blue: '<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12h6"/>', warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4m0 3h.01"/>', plain: '<circle cx="12" cy="12" r="8"/><path d="M12 8v5m0 3h.01"/>' };
+export const provBlock = s => {
+  const p = provenance(s);
+  return html`<div class="prov prov-${p.tone}" title="${p.note}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(PROV_ICON[p.tone])}</svg><div class="prov-t"><b>${p.title}</b>${p.url ? html`<a href="${p.url}" target="_blank" rel="noopener noreferrer" title="${p.url}">${p.shown}</a>` : html`<span>Source link not available</span>`}</div></div>`;
+};
+
 const card = (s, lead) => {
   const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url), sum = plain(s.detail || (s.summary !== s.title ? s.summary : ''));
   return html`<article class="sig src-${sk} ${lead ? 'sig-lead' : ''}">
@@ -112,7 +139,8 @@ const card = (s, lead) => {
     </header>
     <h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
     ${sum ? html`<p class="sc-sum">${sum}</p>` : ''}
-    <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}${verBadge(s.verification)}<span class="imp imp-${s.importance}">${s.importance}</span></div>
+    ${provBlock(s)}
+    <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}<span class="imp imp-${s.importance}">${s.importance}</span></div>
     <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>` : ''}</div>
     ${scoreBreakdown(s)}</article>`;
 };
@@ -125,7 +153,7 @@ export const signalRow = s => {
   const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url);
   return html`<article class="sig-row src-${sk}">${scoreRing(s.score)}
     <div class="sr-main"><h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
-      <p class="sr-meta"><span class="sc-type">${type}</span><span class="srcb">${sname}</span><time data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time>${s.company ? html`<a class="sr-co" href="#company/${s.company_id}">${s.company}</a>` : ''}</p></div>
+      <p class="sr-meta"><span class="sc-type">${type}</span><span class="srcb">${sname}</span><time data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time>${s.company ? html`<a class="sr-co" href="#company/${s.company_id}">${s.company}</a>` : ''}${s.because ? html`<span class="because">${s.because}</span>` : ''}</p></div>
     ${url ? html`<a class="sr-go" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open original source for ${s.title}" title="Open original source">↗</a>` : ''}</article>`;
 };
 
@@ -145,5 +173,10 @@ const EMPTY_ICON = { signal: '<path d="M4 18a8 8 0 0 1 8-8m-8 8a14 14 0 0 1 14-1
 export const empty = (title, body, action, kind = 'data') => html`<div class="empty"><svg class="empty-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(EMPTY_ICON[kind] || EMPTY_ICON.data)}</svg><h3>${title}</h3><p>${body}</p>${action ? html`<div class="empty-act">${action}</div>` : ''}</div>`;
 export const failed = e => html`<div class="empty err"><svg class="empty-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw('<circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 3h.01"/>')}</svg><h3>This page didn’t load</h3><p>${e.message}. Your connection or the server may be slow; nothing was lost.</p><div class="empty-act"><button class="pri" data-action="reload">Try again</button></div></div>`;
 export const pageHead = (title, sub, extra) => html`<header class="phead"><div><h1>${title}</h1>${sub ? html`<p class="sub">${sub}</p>` : ''}</div>${extra || ''}</header>`;
+// Trust signals: how much we watch, how fresh it is, and how many sources feed it. Shown on Now and in the footer.
+export const trustBar = ({ week, sources, lastChecked }) => html`<ul class="trust-bar" aria-label="How SignalStack is kept up to date">
+  <li><b>${num(week || 0)}</b> signal${week === 1 ? '' : 's'} tracked this week</li>
+  <li><i class="upd-dot" aria-hidden="true"></i>Refreshed <b data-ts="${lastChecked || ''}">${lastChecked ? ago(lastChecked) : 'not yet'}</b></li>
+  <li><b>${num(sources || 0)}</b> source${sources === 1 ? '' : 's'} monitored</li></ul>`;
 // "Last updated 4 min ago" with a live dot. main.js refreshes every [data-ts] text once a minute, so the wording never goes stale on screen.
 export const checked = t => html`<span class="upd ${t && Date.now() - parse(t) > 36e5 ? 'stale' : ''}" title="${t ? stamp(t) : 'No update recorded yet'}"><i class="upd-dot" aria-hidden="true"></i>Last updated <b data-ts="${t || ''}">${t ? ago(t) : 'not yet'}</b></span>`;

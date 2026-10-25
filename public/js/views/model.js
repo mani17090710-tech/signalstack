@@ -1,6 +1,6 @@
 // Model detail: facts with their source, a Signal Score with its reasoning, related research and history.
 import { explainer, animateExplainer } from './explain.js';
-import { api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi, figureSource, SOURCE_NAME, EVIDENCE_LABEL, dateLabel } from '../lib.js';
+import { followBtn, api, html, pageHead, scoreRing, scoreBreakdown, verBadge, verLegend, signalCard, modelCard, day, stamp, ago, num, NA, CAT_LABEL, state, mid, safeUrl, host, shortName, ctxLabel, priceLabel, isApi, figureSource, SOURCE_NAME, EVIDENCE_LABEL, dateLabel } from '../lib.js';
 
 const fact = (k, v, unit = '', src = '') => html`<dt>${k}</dt><dd>${v == null || v === '' ? html`<span class="na">${NA}</span>` : v}${v == null || v === '' ? '' : unit}${v == null || v === '' || !src ? '' : html`<span class="fig">${src}</span>`}</dd>`;
 
@@ -42,6 +42,10 @@ export async function render(id) {
         <p class="meta">Link evidence: ${EVIDENCE_LABEL[p.evidence.kind] || p.evidence.kind} (claimed by ${p.evidence.claimed_by || 'a source'}).</p></div>`)}</div></section>` : ''}
       ${d.results.length ? html`<section class="blk"><header><h2>Benchmark results</h2></header><div class="tw"><table><tr><th>Benchmark</th><th>Score</th><th>Evaluator</th><th>Date</th></tr>${d.results.map(r => html`<tr><td>${r.bname} ${r.bver}</td><td><b>${r.score}</b></td><td>${r.evaluator}</td><td>${r.date}</td></tr>`)}</table></div></section>`
         : html`<p class="checked mt">Benchmark scores: ${NA}.</p>`}
+      ${d.family ? html`<section class="blk"><header><h2>Part of the ${d.family.label} series</h2><a href="#family/${d.family.company_id}/${encodeURIComponent(d.family.key.split(':')[1])}">Full timeline</a></header>
+        <div class="panel famcard"><p class="sub">${d.family.count} models from ${d.company ? d.company.name : 'this lab'}, grouped by name. This one belongs to <b>${d.family.generation}</b>.</p>
+          <ol class="famline">${d.family.generations.map(g => html`<li class="${g.current ? 'cur' : ''}"><span class="tl-dot" aria-hidden="true"></span><b>${g.label}</b><span class="fine">${g.first ? day(g.first) : ''}${g.count > 1 ? ` \u00b7 ${g.count} models` : ''}</span></li>`)}</ol>
+          <div class="labact">${followBtn('family', d.family.key)}<a class="btn-sec" href="#family/${d.family.company_id}/${encodeURIComponent(d.family.key.split(':')[1])}">See the timeline</a></div></div></section>` : ''}
       <section class="blk"><header><h2>History</h2></header>${d.events.length ? html`<div class="stack">${d.events.map(signalCard)}</div>` : html`<div class="panel"><p class="na">No signals recorded for this model yet.</p></div>`}</section>
       ${d.similar.length ? html`<section class="blk"><header><h2>Related models</h2><a href="#compare/${mid(m.id)}">Compare</a></header><div class="grid">${d.similar.slice(0, 3).map(modelCard)}</div></section>` : ''}`,
   };

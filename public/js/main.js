@@ -1,5 +1,5 @@
 // App shell: top bar, bottom navigation on phones, hash router, and the data every page shares.
-import { $, $$, api, html, raw, mount, state, failed, skeleton, ago } from './lib.js';
+import { $, $$, api, html, raw, mount, state, failed, skeleton, ago, trustBar } from './lib.js';
 import { openAuth } from './auth.js';
 import { showIntro, introSeen } from './intro.js';
 import * as motion from './motion.js';
@@ -25,7 +25,7 @@ const rawSvg = k => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // route name -> [view module, which nav item to highlight]
 const VIEWS = {
   now: [home, 'now'], signals: [signals, 'signals'], models: [models, 'models'], model: [model, 'models'], research: [research, 'research'],
-  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], compare: [extras.compare, 'you'],
+  search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], compare: [extras.compare, 'you'],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
 const NAV = [['now', 'Now'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
@@ -39,6 +39,7 @@ function shell() {
       <div class="acct" id="acct"></div>
     </header>
     <main id="main" tabindex="-1"></main>
+    <footer class="trust" id="trust" hidden></footer>
     <nav class="bottom" aria-label="Main">${NAV.map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${rawSvg(k)}<span>${l}</span></a>`)}</nav>`);
   const sq = $('#sq');
   // Typing shows quick suggestions (suggest.js); Enter opens the full results page. Typing never moves the person off the page they are on.
@@ -49,16 +50,21 @@ function shell() {
 function drawAcct() {
   const m = state.me;
   mount($('#acct'), m ? html`${m.role === 'admin' ? html`<a class="adminlink" href="#admin">Admin</a>` : ''}<a class="who" href="#you" title="Your account">${m.name || m.email}</a><button id="lo" class="desk">Log out</button>` : html`<button id="li" class="desk">Log in</button><button class="pri" id="su">Sign up</button>`);
-  if (m) $('#lo').onclick = async () => { await api('/logout'); state.me = null; state.watch = []; drawAcct(); route(); };
+  if (m) $('#lo').onclick = async () => { await api('/logout'); state.me = null; state.watch = []; state.follows = []; drawAcct(); route(); };
   else { $('#li').onclick = () => openAuth('login', boot); $('#su').onclick = () => openAuth('signup', boot); }
 }
 
+// Footer trust line, from the site status. Hidden until the numbers arrive, and on Now (which shows the same facts at the top).
+function drawTrust() {
+  const st = state.status || {}, f = $('#trust'); if (!f || !st.counts) return;
+  mount(f, html`${trustBar({ week: st.counts.eventsWeek, sources: st.sources && st.sources.total, lastChecked: st.lastUpdate })}<p>Every item links to its original source and says how far that source can be trusted.</p>`); f.hidden = false;
+}
 let seq = 0;
 export async function route() {
   const [r, ...rest] = (location.hash.replace(/^#\/?/, '') || 'now').split('/'), arg = rest.join('/');
   const [view, navKey] = VIEWS[r] || [null, ''];
   $$('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === navKey || a.dataset.nav === r));
-  const main = $('#main'), mine = ++seq;
+  const main = $('#main'), mine = ++seq; document.body.dataset.route = r || 'now';
   if (!view) { mount(main, html`<div class="empty"><h3>Page not found</h3><p>That address doesn’t exist.</p><a href="#now">Go to Home</a></div>`); return; }
   if (PRIVATE.includes(r) && !state.me) { mount(main, you.gate()); return; }
   mount(main, skeleton(4)); scrollTo(0, 0);
@@ -75,6 +81,11 @@ export async function route() {
   }
 }
 
+// Update every Follow button on screen to match what the person follows.
+function markFollows() {
+  $$('[data-follow]').forEach(b => { const [kind, ...r] = b.dataset.follow.split('|'), on = state.follows.some(x => x.kind === kind && x.key === r.join('|')); b.textContent = on ? 'Following' : 'Follow'; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+}
+
 // One delegated click handler (CSP forbids inline handlers).
 document.addEventListener('click', async e => {
   const w = e.target.closest('[data-watch]');
@@ -84,6 +95,15 @@ document.addEventListener('click', async e => {
     state.watch = await api('/watchlist', state.watch.includes(id) ? 'DELETE' : 'POST', { model_id: id });
     $$('[data-watch]').forEach(b => { if (b.dataset.watch === id) b.textContent = state.watch.includes(id) ? 'Watching' : (b.dataset.long ? 'Watch this model' : 'Watch'); });
     if (location.hash.startsWith('#watchlist')) route();
+    return;
+  }
+  const fo = e.target.closest('[data-follow]');
+  if (fo) {
+    if (!state.me) return openAuth('login', boot);
+    const [kind, ...rest] = fo.dataset.follow.split('|'), key = rest.join('|'), on = state.follows.some(x => x.kind === kind && x.key === key);
+    fo.disabled = true;
+    try { state.follows = await api('/follows', on ? 'DELETE' : 'POST', { kind, key }); } catch (x) { alert(x.message); }
+    fo.disabled = false; markFollows();
     return;
   }
   const a = e.target.closest('[data-action]');
@@ -105,18 +125,20 @@ async function pollAlerts() {
 }
 
 export async function boot() {
-  state.me = null; state.watch = [];
+  state.me = null; state.watch = []; state.follows = [];
   if (!$('#main')) shell(); else drawAcct();
   // Everything starts at once instead of one request after another: the page, who is logged in, and the site counts.
-  const who = (async () => { try { state.me = await api('/me'); state.watch = await api('/watchlist'); } catch (e) { /* guest */ } })()
-    .then(() => { drawAcct(); $$('[data-watch]').forEach(b => { if (state.watch.includes(b.dataset.watch)) b.textContent = 'Watching'; }); });
-  const stat = api('/status').then(s => { state.status = s; }).catch(() => { /* the page shows its own error */ });
+  const who = (async () => { try { state.me = await api('/me'); [state.watch, state.follows] = await Promise.all([api('/watchlist'), api('/follows')]); } catch (e) { /* guest */ } })()
+    .then(() => { drawAcct(); markFollows(); $$('[data-watch]').forEach(b => { if (state.watch.includes(b.dataset.watch)) b.textContent = 'Watching'; }); });
+  state.whoReady = who; // pages that need to know who is logged in (the Now page's Watching section) wait for this
+  const stat = api('/status').then(s => { state.status = s; drawTrust(); }).catch(() => { /* the page shows its own error */ });
   // Only pages that need to know who you are (or the site counts) wait for those; public pages never do.
   if ([...PRIVATE, 'you'].includes((location.hash.replace(/^#\/?/, '') || 'now').split('/')[0])) await Promise.all([who, stat]);
   await route();
 }
 shell(); boot();
 setInterval(pollAlerts, 60000);
+setInterval(() => api('/status').then(s => { state.status = s; drawTrust(); }).catch(() => {}), 300000);
 // Keep every "5 min ago" on screen honest without reloading: refresh them once a minute. A "Last updated" older than an hour turns amber.
 setInterval(() => $$('[data-ts]').forEach(el => {
   const ts = el.dataset.ts; if (!ts) return;

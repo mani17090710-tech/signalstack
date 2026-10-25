@@ -19,6 +19,7 @@ test.before(async () => {
   await ingest.runAll(db, async () => res([{ id: 'someone/old', createdAt: iso(500), likes: 1, downloads: 5, tags: [], pipeline_tag: 'text-generation' }]));
   await ingest.runAll(db, async () => res([
     { id: 'Qwen/Qwen3-Coder-27B', createdAt: iso(2), likes: 40, downloads: 9000, tags: ['text-generation', 'license:apache-2.0'], pipeline_tag: 'text-generation' },
+    { id: 'Qwen/Qwen3-8B', createdAt: iso(50), likes: 12, downloads: 4000, tags: ['text-generation', 'license:apache-2.0'], pipeline_tag: 'text-generation' },
     { id: 'someone/old', createdAt: iso(500), likes: 1, downloads: 5, tags: [], pipeline_tag: 'text-generation' }]));
   db.close();
   child = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, DB: dbFile, DISABLE_INGEST: 'true' }, stdio: 'ignore', cwd: path.join(__dirname, '..') });
@@ -74,6 +75,24 @@ test('now is a ranked, grouped briefing and search matches words in any order', 
   assert.ok((await api('/api/papers?days=7')).body.total >= 0);
 });
 
+test('lab pages list their series; a series has a timeline; the model page links to it', async () => {
+  const c = (await api('/api/companies/qwen')).body;
+  assert.ok(c.stats.models >= 2 && Array.isArray(c.papers) && c.company.hf.includes('Qwen'), 'lab page carries counts, papers and the accounts we monitor');
+  assert.ok(c.series.some(g => g.key === 'qwen:qwen' && g.count >= 2));
+  const f = await api('/api/families/qwen/qwen');
+  assert.strictEqual(f.status, 200);
+  assert.deepStrictEqual(f.body.generations.map(g => g.label), ['Qwen3', 'Qwen3 Coder']);
+  assert.strictEqual((await api('/api/families/qwen/nope')).status, 404);
+  const d = (await api('/api/models/' + encodeURIComponent('hf:Qwen/Qwen3-8B'))).body;
+  assert.strictEqual(d.family.label, 'Qwen'); assert.ok(d.family.generations.some(g => g.current));
+});
+
+test('signals say whether the link is on the lab\'s own domain, and now reports trust figures', async () => {
+  const now = (await api('/api/now')).body;
+  assert.ok(typeof now.counts.week === 'number' && now.counts.sources > 0);
+  assert.ok(now.top.every(s => typeof s.official_domain === 'boolean' && s.source_type));
+});
+
 test('hover preview returns the short version with a score and a source, and 404s unknown models', async () => {
   const d = await api('/api/models/' + encodeURIComponent('hf:Qwen/Qwen3-Coder-27B') + '/preview');
   assert.strictEqual(d.status, 200);
@@ -93,7 +112,7 @@ test('model page keeps verification (evidence) separate from discovery (sources)
   assert.ok(Array.isArray(d.papers));
   const list = (await api('/api/models?verification=verified')).body;
   assert.strictEqual(list.total, 0, 'nothing is Verified without official evidence');
-  assert.strictEqual((await api('/api/models?verification=source_verified')).body.total, 1);
+  assert.strictEqual((await api('/api/models?verification=source_verified')).body.total, 2);
   assert.match((await api('/api/status')).body.coverage, /does not claim to list every/);
 });
 test('auth requires accepting the terms; personal routes need login', async () => {
@@ -118,4 +137,21 @@ test('admin database backup downloads a valid SQLite file and is admin-only', as
   assert.strictEqual(buf.subarray(0, 15).toString(), 'SQLite format 3', 'a real SQLite database');
   const temp = fs.readdirSync(os.tmpdir()).filter(f => /^signalstack-[0-9a-f]{24}\.sqlite$/.test(f));
   assert.strictEqual(temp.length, 0, 'the temporary copy is deleted after sending');
+});
+
+test('following labs and series is private and feeds the Watching list', async () => {
+  const base = `http://127.0.0.1:${port}`, post = (path, body, cookie, method = 'POST') => fetch(base + path, { method, headers: { cookie: cookie || '' }, body: JSON.stringify(body || {}) });
+  assert.strictEqual((await fetch(base + '/api/follows')).status, 401);
+  const login = await post('/api/login', { email: 'a@b.co', password: 'longenough' });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  assert.strictEqual((await post('/api/follows', { kind: 'lab', key: 'nope' }, cookie)).status, 400, 'unknown labs are refused');
+  assert.strictEqual((await post('/api/follows', { kind: 'bogus', key: 'qwen' }, cookie)).status, 400);
+  let r = await (await post('/api/follows', { kind: 'lab', key: 'qwen' }, cookie)).json();
+  assert.deepStrictEqual(r, [{ kind: 'lab', key: 'qwen' }]);
+  await post('/api/follows', { kind: 'family', key: 'qwen:qwen' }, cookie);
+  const w = await (await fetch(base + '/api/watching', { headers: { cookie } })).json();
+  assert.ok(w.items.length >= 1 && w.items.every(i => i.because), 'every item says why it is there');
+  assert.strictEqual(w.follows.labs[0].id, 'qwen');
+  r = await (await post('/api/follows', { kind: 'lab', key: 'qwen' }, cookie, 'DELETE')).json();
+  assert.deepStrictEqual(r, [{ kind: 'family', key: 'qwen:qwen' }]);
 });

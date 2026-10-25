@@ -1,7 +1,7 @@
 // Motion helpers. No libraries: reveals are CSS classes and count-ups are a short requestAnimationFrame loop. Every helper does nothing when the person prefers reduced motion.
 const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const REVEAL = '.sig, .sig-row, .mcard, .rows > *, a.panel';
+const REVEAL = '.sig, .sig-row, .tl-node, .labcard, .seriescard, .mcard, .rows > *, a.panel';
 const parse = t => { const m = /^(\d[\d,]*(?:\.\d+)?)([kMB])?$/.exec(t.trim()); return m ? { n: parseFloat(m[1].replace(/,/g, '')), dec: (m[1].split('.')[1] || '').length, suf: m[2] || '', comma: m[1].includes(',') } : null; };
 
 function countUp(el) {
