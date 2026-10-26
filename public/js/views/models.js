@@ -2,9 +2,9 @@
 // with a count and removable chips, so the page stays calm.
 import { api, html, pageHead, modelCard, empty, skeleton, mount, $, num, applyBars, VER } from '../lib.js';
 
-const f = { cat: '', company: '', license: '', task: '', sort: 'new', official: false, q: '', source: '', verification: '' };
+const f = { cat: '', company: '', license: '', task: '', sort: 'best', official: false, q: '', source: '', verification: '' };
 let rows = 0, total = 0, token = 0;
-const SORTS = [['new', 'Newest'], ['trending', 'Trending'], ['popular', 'Most liked'], ['downloads', 'Most downloaded'], ['params', 'Largest']];
+const SORTS = [['best', 'Best first'], ['new', 'Newest'], ['trending', 'Trending'], ['popular', 'Most liked'], ['downloads', 'Most downloaded'], ['params', 'Largest']];
 const FILTERS = ['source', 'verification', 'company', 'license', 'task'];
 
 export async function render(arg = '') {

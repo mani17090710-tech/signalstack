@@ -85,10 +85,36 @@ export const sourceLine = it => {
 
 export const scoreRing = (score, big = false) => html`<span class="score ${score >= 80 ? 'hi' : score >= 60 ? 'mid' : 'lo'} ${big ? 'big' : ''}" role="img" aria-label="Signal Score ${score} out of 100"><b>${score}</b></span>`;
 const PART_LABEL = { impact: 'Impact', popularity: 'Popularity', technical: 'Technical', relevance: 'Relevance', freshness: 'Freshness' };
-export const scoreBreakdown = (s, open = false) => html`<details class="why" ${open ? 'open' : ''}><summary>Why this score</summary>
-  <div class="parts">${Object.entries(PART_LABEL).map(([k, l]) => html`<div class="part"><span>${l}</span>${s.parts[k] == null ? html`<em>No data</em>` : html`<span class="track"><i data-bar="${s.parts[k]}"></i></span><b>${s.parts[k]}</b>`}</div>`)}</div>
-  <ul>${s.why.map(w => html`<li>${w}</li>`)}</ul>
-  <p class="fine">Signal Score is SignalStack’s own estimate built from the evidence listed here. It is not an objective measure. Parts with no data are left out, not counted as zero.</p></details>`;
+const PART_HELP = {
+  impact: 'How fast people are adopting a model since it came out.',
+  popularity: 'Likes and downloads of the model (or of models that cite a paper).',
+  technical: 'Model size, or how big a software release is.',
+  relevance: 'Whether a lab we track is behind it.',
+  freshness: 'How recent it is. Fades over about three days.',
+};
+const DEFAULT_SCORE = { weights: { impact: .2, popularity: .2, technical: .2, relevance: .25, freshness: .15 }, significant: 60, major: 80 };
+// "Why this score": the real weights and thresholds (from the server), what each part contributed, and the evidence behind it, so the number can be checked.
+export const scoreBreakdown = (s, open = false) => {
+  const sc = (state.status && state.status.score) || DEFAULT_SCORE, keys = Object.keys(PART_LABEL), used = keys.filter(k => s.parts[k] != null);
+  const den = used.reduce((t, k) => t + sc.weights[k], 0) || 1, share = k => sc.weights[k] / den;
+  // Whole-number points that add up exactly to the score: round each part down, then give the leftover points to the largest fractions.
+  const raw = Object.fromEntries(used.map(k => [k, s.parts[k] * share(k)])), pts = Object.fromEntries(used.map(k => [k, Math.floor(raw[k])]));
+  let left = s.score - used.reduce((t, k) => t + pts[k], 0);
+  for (const k of [...used].sort((a, b) => (raw[b] - pts[b]) - (raw[a] - pts[a]))) { if (left <= 0) break; pts[k]++; left--; }
+  const skipped = keys.length - used.length;
+  return html`<details class="why score-why" ${open ? 'open' : ''}><summary>Why this score <span class="sw-pill imp imp-${s.importance}">${s.score} · ${s.importance}</span></summary>
+  <p class="sw-intro">Each part is rated 0 to 100 from evidence we hold. The score is their weighted average, so a part with no data is skipped, never counted as zero.</p>
+  <div class="sw-grid" role="table" aria-label="How the score is built">
+    <div class="sw-head" role="row"><span role="columnheader">Part</span><span role="columnheader">Rating</span><span role="columnheader" class="sw-n">Weight</span><span role="columnheader" class="sw-n">Adds</span></div>
+    ${keys.map(k => s.parts[k] == null
+      ? html`<div class="sw-row skip" role="row"><div class="sw-name"><b>${PART_LABEL[k]}</b><small>${PART_HELP[k]}</small></div><span class="sw-none">No data. Left out.</span></div>`
+      : html`<div class="sw-row" role="row"><div class="sw-name"><b>${PART_LABEL[k]}</b><small>${PART_HELP[k]}</small></div><span class="sw-bar"><span class="track"><i data-bar="${s.parts[k]}"></i></span><b class="sw-v">${s.parts[k]}</b></span><span class="sw-n sw-w">${Math.round(share(k) * 100)}%</span><span class="sw-n sw-add">+${pts[k]}</span></div>`)}
+    <div class="sw-total" role="row"><span>Signal Score</span><b>${s.score}</b></div></div>
+  ${skipped ? html`<p class="fine">${skipped} part${skipped === 1 ? ' has' : 's have'} no data here, so the remaining weights are scaled up to add to 100%.</p>` : html``}
+  <div class="sw-scale" aria-label="Where this score sits"><span class="sw-seg n">Normal<small>under ${sc.significant}</small></span><span class="sw-seg i">Important<small>${sc.significant} to ${sc.major - 1}</small></span><span class="sw-seg m">Major<small>${sc.major}+</small></span><i class="sw-mark" data-bar="${s.score}" aria-hidden="true"></i></div>
+  ${s.why.length ? html`<p class="sw-evh">What this is based on</p><ul>${s.why.map(w => html`<li>${w}</li>`)}</ul>` : ''}
+  <p class="fine">Signal Score is SignalStack’s own estimate built from the evidence listed here. It is not an objective measure.</p></details>`;
+};
 
 // ---------- signal card ----------
 // Where a signal came from (colour-coded) and what kind of thing it is. Both are read from the source type the ingester stored, never guessed.
@@ -163,13 +189,23 @@ export const signalRow = s => {
     ${url ? html`<a class="sr-go" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open original source for ${s.title}" title="Open original source">↗</a>` : ''}</article>`;
 };
 
-export const modelCard = m => html`<article class="mcard">
+// A missing value reads "Not listed" (dimmed) with the full wording on hover, so a sparse card looks quiet instead of broken.
+const miss = v => (v == null || v === '' || v === NA ? html`<span class="na" title="${NA}">Not listed</span>` : v);
+const CONFIRMED = { verified: 'Confirmed by the provider', source_verified: 'Straight from the publisher' };
+export const modelCard = m => {
+  const api = isApi(m), strong = m.verification === 'verified' || m.verification === 'source_verified';
+  const facts = api ? [['Context', ctxLabel(m.context_length)], ['Input price', m.price_in == null ? null : '$' + m.price_in + ' / 1M'], ['Output price', m.price_out == null ? null : '$' + m.price_out + ' / 1M'], [dateLabel(m), m.released_at ? day(m.released_at) : null]]
+    : [['Size', m.params], ['Likes', num(m.likes)], ['Downloads', num(m.downloads)], [dateLabel(m), m.released_at ? day(m.released_at) : null]];
+  const gaps = facts.filter(([, v]) => v == null || v === '').length;
+  return html`<article class="mcard vf-${VER[m.verification] ? m.verification : 'unverified'}">
+  ${strong ? html`<div class="mc-ver">${verBadge(m.verification)}<span>${CONFIRMED[m.verification]}</span></div>` : ''}
   <div class="mc-top"><a class="mc-name" href="#model/${mid(m.id)}">${shortName(m.id).split('/').pop()}</a>${m.trend_rank ? html`<span class="tag">Trending #${m.trend_rank}</span>` : ''}</div>
   <p class="mc-by">${m.company ? html`<a href="#company/${m.company_id}">${m.company}</a>` : m.creator || 'Unknown publisher'}</p>
-  <div class="tags">${m.cats.slice(0, 3).map(c => html`<span class="tag">${CAT_LABEL[c] || c}</span>`)}${m.pipeline && !m.cats.length ? html`<span class="tag">${m.pipeline}</span>` : ''}${verBadge(m.verification)}</div>
-  <dl class="facts">${isApi(m) ? html`<div><dt>Context</dt><dd>${ctxLabel(m.context_length) || NA}</dd></div><div><dt>Input price</dt><dd>${m.price_in == null ? NA : '$' + m.price_in + ' / 1M'}</dd></div><div><dt>Output price</dt><dd>${m.price_out == null ? NA : '$' + m.price_out + ' / 1M'}</dd></div><div><dt>${dateLabel(m)}</dt><dd>${day(m.released_at)}</dd></div>`
-    : html`<div><dt>Size</dt><dd>${m.params || NA}</dd></div><div><dt>Likes</dt><dd>${num(m.likes)}</dd></div><div><dt>Downloads</dt><dd>${num(m.downloads)}</dd></div><div><dt>${dateLabel(m)}</dt><dd>${day(m.released_at)}</dd></div>`}</dl>
+  <div class="tags">${m.cats.slice(0, 3).map(c => html`<span class="tag">${CAT_LABEL[c] || c}</span>`)}${m.pipeline && !m.cats.length ? html`<span class="tag">${m.pipeline}</span>` : ''}${strong ? '' : verBadge(m.verification)}</div>
+  <dl class="facts">${facts.map(([k, v]) => html`<div><dt>${k}</dt><dd>${miss(v)}</dd></div>`)}</dl>
+  ${gaps >= 2 ? html`<p class="mc-thin">This source lists few details.</p>` : ''}
   <div class="mc-act"><button class="mini" data-watch="${m.id}">${state.watch.includes(m.id) ? 'Watching' : 'Watch'}</button>${qlBtn(m.id)}</div></article>`;
+};
 
 // Loading placeholder shaped like a signal card, so the page does not jump when the real cards arrive. After a few seconds it explains the wait
 // (pure CSS, no timers): free hosting sleeps when idle and the first request can take up to a minute.
