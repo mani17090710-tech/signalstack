@@ -353,24 +353,36 @@ get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
   };
 });
 
-get(/^\/api\/companies$/, () => COMPANIES.map(c => ({
-  id: c.id, name: c.name, site: c.site, official: c.hf.length > 0 || c.gh.length > 0,
-  models: db.prepare('select count(*) c from models where company_id=?').get(c.id).c,
-  signals30d: db.prepare("select count(*) c from events where company_id=? and ts>=datetime('now','-30 day')").get(c.id).c,
-})));
+// One row per lab for the Labs page ("Lab Radar"): how recently each was active, what its latest signal was, and which kinds of source we watch for it.
+const labActivity = () => new Map(db.prepare(`select e.company_id id, max(e.ts) last, coalesce(sum(e.ts>=datetime('now','-7 day')),0) n7, coalesce(sum(e.ts>=datetime('now','-30 day')),0) n30 from events e where e.company_id is not null and ${EV_OK} group by e.company_id`).all().map(r => [r.id, r]));
+const labState = a => !a ? 'idle' : a.n7 > 0 ? 'active' : a.n30 > 0 ? 'quiet' : 'idle';
+const labSources = c => [c.hf.length && 'Hugging Face', c.gh.length && 'GitHub', c.domains.length && 'Website', (c.or || []).length && 'OpenRouter'].filter(Boolean);
+get(/^\/api\/companies$/, () => {
+  const act = labActivity(), mc = new Map(db.prepare('select company_id id,count(*) n from models where company_id is not null group by company_id').all().map(r => [r.id, r.n]));
+  const latest = db.prepare(`select coalesce(e.title,e.summary) title,e.cat from events e where e.company_id=? and ${EV_OK} order by e.ts desc limit 1`);
+  return COMPANIES.map(c => {
+    const a = act.get(c.id), l = a ? latest.get(c.id) : null;
+    return { id: c.id, name: c.name, site: c.site, official: c.hf.length > 0 || c.gh.length > 0, sources: labSources(c), models: mc.get(c.id) || 0, signals30d: a ? a.n30 : 0, signals7d: a ? a.n7 : 0,
+      state: labState(a), last_signal: a ? a.last : null, latest: l ? { title: l.title, cat: l.cat } : null };
+  });
+});
 // A lab's models as plain rows, used to work out its model series.
 const labRows = id => db.prepare('select m.* from models m where m.verified=1 and m.company_id=? and m.delisted_at is null').all(id);
 const seriesBrief = g => ({ key: g.key, label: g.label, count: g.models.length, generations: g.generations.length, first: g.first, last: g.last, latest: modelOut(g.models[g.models.length - 1]) });
 get(/^\/api\/companies\/([\w-]+)$/, ({ m }) => {
   const c = byId(m[1]); if (!c) throw fail(404, 'Company not found.');
-  const papers = db.prepare("select * from papers where verified=1 and entities like ? order by coalesce(published_at,date) desc limit 8").all('%"' + c.id + '"%').map(x => paperOut(x, false));
+  const papers = db.prepare("select * from papers where verified=1 and entities like ? order by coalesce(published_at,date) desc limit 8").all('%"' + c.id + '"%').map(x => paperOut(x, false)), act = labActivity().get(c.id);
   return {
     company: { id: c.id, name: c.name, site: c.site, hf: c.hf, gh: c.gh, domains: c.domains, openrouter: c.or || [] },
     models: db.prepare(M_SELECT + ' where m.verified=1 and m.company_id=? order by coalesce(m.released_at,m.rel) desc limit 40').all(c.id).map(modelOut),
     signals: signals(new URLSearchParams('window=30d&company=' + c.id)).slice(0, 30),
     series: seriesOf(labRows(c.id)).map(seriesBrief),
     papers,
-    stats: { models: db.prepare('select count(*) c from models where verified=1 and company_id=?').get(c.id).c, papers: db.prepare("select count(*) c from papers where verified=1 and entities like ?").get('%"' + c.id + '"%').c, signals30d: db.prepare("select count(*) c from events where company_id=? and ts>=datetime('now','-30 day')").get(c.id).c },
+    activity: { state: labState(act), last: act ? act.last : null, n7: act ? act.n7 : 0, n30: act ? act.n30 : 0 },
+    // The newest items from any monitored source, at any age, so a quiet lab still shows what it last did.
+    recent: signalRows(' and e.company_id=?', [c.id], 6).map(signalOut),
+    sources: labSources(c),
+    stats: { models: db.prepare('select count(*) c from models where verified=1 and company_id=?').get(c.id).c, papers: db.prepare("select count(*) c from papers where verified=1 and entities like ?").get('%"' + c.id + '"%').c, signals30d: act ? act.n30 : 0 },
   };
 });
 // The history of one model series: generations from oldest to newest, with every model in each.

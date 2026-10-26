@@ -218,3 +218,15 @@ test('email digest: preferences, preview, one-click unsubscribe, and a test send
   assert.strictEqual((await call('/api/digest', 'GET', null, cookie)).body.freq, 'off');
   assert.match(await (await fetch(base + '/digest/unsubscribe?t=bad')).text(), /Link expired/);
 });
+
+test('lab radar: every lab reports its activity state, sources and last signal; the lab page leads with recent signals', async () => {
+  const list = (await api('/api/companies')).body;
+  assert.ok(list.length > 10 && list.every(c => ['active', 'quiet', 'idle'].includes(c.state) && Array.isArray(c.sources) && typeof c.signals7d === 'number'));
+  assert.ok(list.every(c => c.state === 'idle' ? c.signals30d === 0 : c.signals30d > 0 && c.last_signal), 'state agrees with the counts and the last-signal date');
+  assert.ok(list.every(c => c.signals7d <= c.signals30d));
+  const q = list.find(c => c.id === 'qwen'); assert.deepStrictEqual(q.sources, ['Hugging Face', 'Website', 'OpenRouter'], 'sources come from the accounts we watch (Qwen has no GitHub account on our list)');
+  const d = (await api('/api/companies/qwen')).body;
+  assert.ok(d.activity && d.activity.n30 === q.signals30d && d.activity.state === q.state, 'list and lab page agree');
+  assert.ok(Array.isArray(d.recent) && d.recent.length <= 6 && d.recent.every((s, i, a) => !i || a[i - 1].ts >= s.ts), 'newest first');
+  assert.strictEqual(d.activity.last, d.recent.length ? d.recent[0].ts : null, 'the last-signal date is the newest recent item');
+});

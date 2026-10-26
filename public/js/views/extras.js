@@ -1,34 +1,64 @@
 // Companies, comparison, benchmarks and documentation diffs.
-import { ctxLabel, priceLabel, api, html, pageHead, empty, modelCard, signalCard, day, num, NA, mid, shortName, safeUrl, $, mount, CAT_LABEL, followBtn, dateLabel, verBadge, isApi, scoreRing } from '../lib.js';
+import { state, ago, signalRow, ctxLabel, priceLabel, api, html, pageHead, empty, modelCard, signalCard, day, num, NA, mid, shortName, safeUrl, $, mount, CAT_LABEL, followBtn, dateLabel, verBadge, isApi, scoreRing } from '../lib.js';
 import { plainLine } from './explain.js';
 
 // ---- Labs ----
 const fmtRange = (a, b) => (a && b ? (day(a) === day(b) ? day(a) : `${day(a)} to ${day(b)}`) : a ? day(a) : NA);
 const ACCOUNT = { hf: n => ['Hugging Face', 'https://huggingface.co/' + n, n], gh: n => ['GitHub', 'https://github.com/' + n, n] };
 
+// A small coloured mark with the lab's initials, so a grid of labs can be scanned by eye. The colour comes from the lab's id, so it never changes.
+const hue = id => [...String(id)].reduce((t, c) => t + c.charCodeAt(0), 0) % 12;
+const initials = n => { const w = String(n).replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/).filter(Boolean); return (w.length > 1 ? w[0][0] + w[1][0] : String(n).slice(0, 2)).toUpperCase(); };
+const mark = (c, big) => html`<span class="lab-mark h${hue(c.id)} ${big ? 'big' : ''}" aria-hidden="true">${initials(c.name)}</span>`;
+const STATE = { active: 'Active this week', quiet: 'Quiet this week', idle: 'No signals in 30 days' };
+const pulse = state => html`<span class="pulse ${state}"><i aria-hidden="true"></i>${STATE[state]}</span>`;
+const lastLine = ts => ts ? `Last signal: ${ago(ts)}` : 'No signals recorded yet';
+const SORTS = { recent: ['Latest activity', (a, b) => (b.last_signal || '').localeCompare(a.last_signal || '') || a.name.localeCompare(b.name)], name: ['A to Z', (a, b) => a.name.localeCompare(b.name)], models: ['Most models', (a, b) => b.models - a.models || a.name.localeCompare(b.name)] };
+
+const labCard = c => html`<article class="panel labcard ${c.state}">
+  <div class="lc-top">${mark(c)}<div class="lc-id"><h3><a class="lc-link" href="#company/${c.id}">${c.name}</a></h3>${pulse(c.state)}</div>${followBtn('lab', c.id)}</div>
+  ${c.latest ? html`<p class="lc-latest"><span class="lc-cat">${CAT_LABEL[c.latest.cat] || c.latest.cat}</span>${c.latest.title}</p>` : html`<p class="lc-latest dim">Nothing new detected from this lab’s monitored sources.</p>`}
+  <p class="lc-last"><b>${lastLine(c.last_signal)}</b>${c.signals7d ? ` · ${c.signals7d} this week` : ''}${c.signals30d ? ` · ${c.signals30d} in 30 days` : ''}</p>
+  <div class="lc-foot"><span class="lc-src">${c.sources.length ? c.sources.map(x => html`<span class="srcb">${x}</span>`) : html`<span class="fine">No official accounts on our list</span>`}</span><span class="lc-go" aria-hidden="true">${c.models} model${c.models === 1 ? '' : 's'} →</span></div></article>`;
+
 export const companies = {
   async render() {
     const list = await api('/companies');
-    return { title: 'Labs', html: html`${pageHead('Labs', 'The AI labs we follow. Each page gathers a lab\u2019s latest models, papers and announcements in one place, and shows which accounts and websites we treat as official.')}
-      <div class="grid">${list.map(c => html`<a class="panel labcard" href="#company/${c.id}"><h3>${c.name}</h3><p class="sub">${c.models ? `${c.models} model${c.models === 1 ? '' : 's'} stored` : 'No models stored yet'}${c.signals30d ? `, ${c.signals30d} signal${c.signals30d === 1 ? '' : 's'} in 30 days` : ''}</p>
-        <p class="fine">${c.official ? 'Official Hugging Face or GitHub accounts monitored' : 'Tracked through the OpenRouter catalogue and announcements'}</p></a>`)}</div>` };
+    const n = k => list.filter(c => c.state === k).length;
+    return { title: 'Labs', html: html`${pageHead('Lab radar', 'Which AI labs are shipping right now. Every lab shows when it last did something, and which of its accounts and websites we watch to know.')}
+      <div class="toolbar tb-main radar-bar"><div class="seg" id="lf" role="group" aria-label="Show">
+        <button class="on" data-f="all">All <span class="cnt">${list.length}</span></button><button data-f="active">Active this week <span class="cnt">${n('active')}</span></button><button data-f="quiet">Quiet <span class="cnt">${n('quiet')}</span></button><button data-f="idle">No signals in 30 days <span class="cnt">${n('idle')}</span></button><button data-f="following">Following <span class="cnt" id="lfn"></span></button></div>
+        <label class="sortl">Sort <select id="ls" aria-label="Sort labs">${Object.entries(SORTS).map(([k, [t]]) => html`<option value="${k}">${t}</option>`)}</select></label></div>
+      <div class="grid labgrid" id="labgrid"></div>`,
+    after(root) {
+      let f = 'all', so = 'recent';
+      const draw = () => {
+        const fol = new Set(state.follows.filter(x => x.kind === 'lab').map(x => x.key)), shown = list.filter(c => f === 'all' || (f === 'following' ? fol.has(c.id) : c.state === f)).sort(SORTS[so][1]);
+        $('#lfn', root).textContent = fol.size;
+        mount($('#labgrid', root), shown.length ? html`${shown.map(labCard)}` : html`<div class="empty" style="grid-column:1/-1"><h3>${f === 'following' ? 'You are not following any labs yet' : 'No labs match'}</h3><p>${f === 'following' ? 'Choose Follow on a lab to see it here and on the Now page.' : 'Try another filter.'}</p></div>`);
+      };
+      $('#lf', root).onclick = e => { const b = e.target.closest('[data-f]'); if (!b) return; f = b.dataset.f; root.querySelectorAll('#lf button').forEach(x => x.classList.toggle('on', x === b)); draw(); };
+      $('#ls', root).onchange = e => { so = e.target.value; draw(); };
+      root.addEventListener('click', e => { if (e.target.closest('[data-follow]')) setTimeout(() => { if (f === 'following') draw(); else $('#lfn', root).textContent = state.follows.filter(x => x.kind === 'lab').length; }, 500); });
+      draw();
+    } };
   },
 };
 export const company = {
   async render(id) {
     const d = await api('/companies/' + encodeURIComponent(id)), c = d.company, st = d.stats;
-    const news = d.signals.filter(s => ['Announcement', 'Open Source'].includes(s.cat));
     const accounts = [...c.hf.map(ACCOUNT.hf), ...c.gh.map(ACCOUNT.gh)];
     return { title: c.name, html: html`<p class="checked"><a href="#companies">Labs</a></p>
-      <header class="labhero"><div><h1>${c.name}</h1><p class="sub">${st.models} model${st.models === 1 ? '' : 's'} \u00b7 ${st.papers} paper${st.papers === 1 ? '' : 's'} naming it \u00b7 ${st.signals30d} signal${st.signals30d === 1 ? '' : 's'} in 30 days</p></div>
+      <header class="labhero"><div class="lh-id">${mark({ id: c.id, name: c.name }, true)}<div><h1>${c.name}</h1><p class="lh-sub">${pulse(d.activity.state)}<span class="sub">${d.sources.length ? 'Watched through ' + d.sources.join(', ') : 'No official accounts on our list'}</span></p></div></div>
         <div class="labact">${followBtn('lab', c.id, true)}${safeUrl(c.site) ? html`<a class="btn-sec" href="${c.site}" target="_blank" rel="noopener noreferrer">Official site <span aria-hidden="true">\u2197</span></a>` : ''}</div></header>
+      <dl class="labstats"><div class="ls-main"><dt>Last signal</dt><dd>${d.activity.last ? ago(d.activity.last) : 'None yet'}</dd></div><div><dt>This week</dt><dd>${d.activity.n7}</dd></div><div><dt>Last 30 days</dt><dd>${d.activity.n30}</dd></div><div><dt>Models</dt><dd>${st.models}</dd></div><div><dt>Papers naming it</dt><dd>${st.papers}</dd></div></dl>
+      <section class="blk"><header><h2>Recent signals</h2>${d.activity.n30 ? html`<a href="#signals/${encodeURIComponent('company=' + c.id + '&window=30d')}">See all in 30 days</a>` : ''}</header>${d.recent.length ? html`${d.activity.n30 ? '' : html`<p class="note">Nothing in the last 30 days. These are the latest items from ${c.name}\u2019s monitored sources.</p>`}<div class="rows-sig mt">${d.recent.map(signalRow)}</div>` : empty('No signals yet', `Nothing has been detected from ${c.name}\u2019s monitored sources so far.`, '', 'signal')}</section>
       <section class="panel labsrc"><h2>Where we get ${c.name}\u2019s information</h2>
         <ul class="srclist">${accounts.map(([k, u, n]) => html`<li><span class="srcb">${k}</span><a href="${u}" target="_blank" rel="noopener noreferrer">${u.replace('https://', '')}</a><span class="fine">official account we monitor</span></li>`)}
           ${c.domains.length ? html`<li><span class="srcb">Websites</span><span>${c.domains.join(', ')}</span><span class="fine">links here count as official</span></li>` : ''}
           ${c.openrouter.length ? html`<li><span class="srcb">OpenRouter</span><span>${c.openrouter.join(', ')}</span><span class="fine">third-party catalogue, not confirmed by the lab</span></li>` : ''}
           ${accounts.length ? '' : html`<li class="fine">${c.name} has no official Hugging Face or GitHub account on our list, so its entries come from catalogues and announcements.</li>`}</ul></section>
       ${d.series.length ? html`<section class="blk"><header><h2>Model series <span class="cnt">${d.series.length}</span></h2></header><div class="grid">${d.series.map(g => html`<a class="panel seriescard" href="#family/${c.id}/${encodeURIComponent(g.key.split(':')[1])}"><h3>${g.label} series</h3><p class="sub">${g.count} models in ${g.generations} generation${g.generations === 1 ? '' : 's'}</p><p class="fine">${fmtRange(g.first, g.last)}</p><p class="fine">Latest: <b>${shortName(g.latest.id).split('/').pop()}</b></p><span class="tl-link">See the timeline \u2192</span></a>`)}</div></section>` : ''}
-      <section class="blk"><header><h2>Announcements and releases</h2>${news.length ? html`<a href="#signals/${encodeURIComponent('company=' + c.id + '&window=30d')}">See all signals</a>` : ''}</header>${news.length ? html`<div class="stack">${news.slice(0, 6).map(signalCard)}</div>` : empty('No announcements in the last 30 days', `Nothing new has been detected from ${c.name}\u2019s monitored sources.`, '', 'signal')}</section>
       <section class="blk"><header><h2>Models <span class="cnt">${st.models}</span></h2>${st.models > 12 ? html`<a href="#models/${encodeURIComponent('company=' + c.id)}">See all ${st.models}</a>` : ''}</header>${d.models.length ? html`<div class="grid">${d.models.slice(0, 12).map(modelCard)}</div>` : empty('No models stored', `${c.name} has no models on a Hugging Face account we monitor or in the catalogue yet.`)}</section>
       <section class="blk"><header><h2>Research naming ${c.name} <span class="cnt">${st.papers}</span></h2><a href="#research">All research</a></header>${d.papers.length ? html`<div class="rows-sig">${d.papers.slice(0, 6).map(p => html`<article class="sig-row src-arx"><span class="res-ico" aria-hidden="true">\u25a4</span><div class="sr-main"><h3>${safeUrl(p.url) ? html`<a href="${p.url}" target="_blank" rel="noopener noreferrer">${p.title}</a>` : p.title}</h3><p class="sr-meta"><span class="sc-type">Paper</span><span class="srcb">arXiv ${p.arxiv_id}</span><time>${day(p.published_at)}</time></p></div>${safeUrl(p.url) ? html`<a class="sr-go" href="${p.url}" target="_blank" rel="noopener noreferrer" aria-label="Open on arXiv" title="Open on arXiv">\u2197</a>` : ''}</article>`)}</div>` : empty('No papers naming this lab yet', 'Papers appear here when their title or abstract names the lab or its model families.', '', 'data')}</section>` };
   },
