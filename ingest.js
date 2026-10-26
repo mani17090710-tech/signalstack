@@ -541,28 +541,57 @@ function prune(db) {
 }
 
 let running = false;
+// Runs one source and records the outcome (status on the source, a line in the log). Never throws: a failure is the result.
+async function runLogged(db, src, f, opt) {
+  const ts = nowIso();
+  try {
+    const r = await runSource(db, src, f, opt);
+    db.prepare('update sources_config set last_run=?,last_status=?,last_error=? where id=?').run(ts, r.status, r.warning || null, src.id);
+    const msg = r.status === 'unchanged' ? 'No new content since last check.' : `${r.first ? 'First run (backfill): ' : ''}Read ${r.items} item(s), ${r.created} new.${r.warning ? ' ' + r.warning : ''}`;
+    db.prepare('insert into ingestion_log(source_id,ts,status,message,items) values(?,?,?,?,?)').run(src.id, ts, r.status, msg, r.items);
+    return { status: r.status, message: msg, items: r.items, created: r.created || 0, inserted: r.inserted || [] };
+  } catch (e) {
+    db.prepare('update sources_config set last_run=?,last_status=?,last_error=? where id=?').run(ts, 'error', e.message, src.id);
+    db.prepare('insert into ingestion_log(source_id,ts,status,message,items) values(?,?,?,?,0)').run(src.id, ts, 'error', e.message);
+    return { status: 'error', message: e.message, items: 0, created: 0, inserted: [] };
+  }
+}
 async function runAll(db, f = fetch, opt = {}) {
   if (running) return [];
   running = true;
   try {
-    const sources = db.prepare('select * from sources_config where enabled=1').all(), all = [];
-    for (const src of sources) {
-      const ts = nowIso();
-      try {
-        const r = await runSource(db, src, f, opt);
-        db.prepare('update sources_config set last_run=?,last_status=?,last_error=? where id=?').run(ts, r.status, r.warning || null, src.id);
-        const msg = r.status === 'unchanged' ? 'No new content since last check.' : `${r.first ? 'First run (backfill): ' : ''}Read ${r.items} item(s), ${r.created} new.${r.warning ? ' ' + r.warning : ''}`;
-        db.prepare('insert into ingestion_log(source_id,ts,status,message,items) values(?,?,?,?,?)').run(src.id, ts, r.status, msg, r.items);
-        all.push(...r.inserted);
-      } catch (e) {
-        db.prepare('update sources_config set last_run=?,last_status=?,last_error=? where id=?').run(ts, 'error', e.message, src.id);
-        db.prepare('insert into ingestion_log(source_id,ts,status,message,items) values(?,?,?,?,0)').run(src.id, ts, 'error', e.message);
-      }
-    }
+    const all = [];
+    for (const src of db.prepare('select * from sources_config where enabled=1').all()) all.push(...(await runLogged(db, src, f, opt)).inserted);
     linkModelPapers(db);
     prune(db);
     return all;
   } finally { running = false; }
+}
+// Refresh one source on request, even if it is paused. Shares the lock with the full run so two fetches never overlap; returns null when busy.
+async function runOne(db, id, f = fetch, opt = {}) {
+  const src = db.prepare('select * from sources_config where id=?').get(id); if (!src) return undefined;
+  if (running) return null;
+  running = true;
+  try { const r = await runLogged(db, src, f, opt); linkModelPapers(db); return r; } finally { running = false; }
+}
+const isRunning = () => running;
+
+// Reads a source once and reports what it found, without saving anything. Lets an admin check an address before adding it.
+async function probe(kind, cfg, f = fetch) {
+  if (kind === 'huggingface') {
+    const r = await fetchRes(hfUrl({ ...cfg, limit: 5 }), f, hfHeaders()), items = parseHuggingFace(r.text);
+    return { found: items.length, sample: items.slice(0, 3).map(x => x.name), note: items.length ? '' : 'The account exists but has no public models, or the name is wrong.' };
+  }
+  if (kind === 'github') {
+    const r = await fetchRes(`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/releases?per_page=5`, f, process.env.GITHUB_TOKEN ? { Authorization: 'Bearer ' + process.env.GITHUB_TOKEN } : {}), items = parseGitHub(r.text);
+    return { found: items.length, sample: items.slice(0, 3).map(x => `${x.name} (${x.tag})`), note: items.length ? '' : 'The repository exists but has published no releases yet.' };
+  }
+  if (kind === 'feed') {
+    const r = await fetchRes(cfg.url, f), items = parseFeed(r.text);
+    if (!items.length) throw new Error('That address did not return a readable RSS or Atom feed.');
+    return { found: items.length, sample: items.slice(0, 3).map(x => x.title), note: '' };
+  }
+  throw new Error('This source type cannot be tested here.');
 }
 
 // ---------- on-demand enrichment of one model (called when someone opens its page) ----------
@@ -588,4 +617,4 @@ async function enrichModel(db, id, f = fetch) {
   }
 }
 
-module.exports = { parseCurated, parseOpenRouter, runAll, runSource, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };
+module.exports = { parseCurated, parseOpenRouter, runAll, runOne, runSource, probe, isRunning, enrichModel, parseHuggingFace, parseGitHub, parseArxiv, parseFeed, describeModel };

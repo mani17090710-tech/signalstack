@@ -1,7 +1,9 @@
 'use strict';
 // Signalstack backend. Run: node server.js  (Node 22.5+, no npm install needed)
 const http = require('http'), fs = require('fs'), path = require('path'), cr = require('crypto'), zlib = require('zlib');
-const { openDb } = require('./lib/db');
+const { openDb, SOURCES, SRC_VERSION } = require('./lib/db');
+const srcRules = require('./lib/sources');
+const dnsp = require('node:dns').promises;
 const { backup } = require('node:sqlite');
 const os = require('os');
 const { COMPANIES, byId: COMPANY, isOfficialUrl } = require('./lib/companies');
@@ -16,7 +18,7 @@ const pub = require('./lib/publicapi');
 const digest = require('./lib/digest');
 const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
-const { runAll, enrichModel } = require('./ingest');
+const { runAll, runOne, probe, isRunning, enrichModel } = require('./ingest');
 
 const PORT = process.env.PORT || 3000;
 const db = openDb(process.env.DB || 'signalstack.db');
@@ -479,6 +481,29 @@ function servePublic(req, res, p, q) {
   res.end(pub.embedHtml(items, { base, title: 'AI right now', theme: q.get('theme') }));
 }
 
+// ---------- admin: source management ----------
+const BUILTIN = new Set(SOURCES.map(x => x[0])), srcInterval = () => Math.max(5, +process.env.INGEST_INTERVAL_MIN || 30);
+// Every source with its health, what it watches and its last dozen runs. Worst first, so what needs attention is at the top.
+function sourceRows(onlyId) {
+  const hist = db.prepare('select ts,status,message,items from ingestion_log where source_id=? order by ts desc, id desc limit 12'), now = Date.now(), iv = srcInterval();
+  const rows = db.prepare('select * from sources_config' + (onlyId ? ' where id=?' : '')).all(...(onlyId ? [onlyId] : []));
+  return rows.map(src => {
+    const recent = hist.all(src.id), h = srcRules.health(src, recent, now, iv), w = srcRules.watches(src), cfg = parseJson(src.config, {});
+    return { id: src.id, kind: src.kind, kind_label: srcRules.KIND_LABEL[src.kind] || src.kind, label: src.label, enabled: !!src.enabled, builtin: BUILTIN.has(src.id), tier: cfg.tier || null, company: cfg.company || null,
+      watch: w.text, watch_url: w.url, last_run: src.last_run, last_status: src.last_status, last_error: src.last_error, state: h.state, failures: h.failures, failing_since: h.failingSince, last_ok: h.lastOk,
+      history: recent.map(r => ({ ts: r.ts, status: r.status, message: r.message, items: r.items })) };
+  }).sort((a, b) => srcRules.ORDER[a.state] - srcRules.ORDER[b.state] || a.label.localeCompare(b.label));
+}
+const sourceSummary = rows => ({ total: rows.length, ...Object.fromEntries(['healthy', 'failing', 'stale', 'warning', 'new', 'paused'].map(k => [k, rows.filter(r => r.state === k).length])),
+  lastRun: rows.reduce((m, r) => (r.last_run && r.last_run > m ? r.last_run : m), '') || null, intervalMin: srcInterval(), running: isRunning() });
+// A feed address must resolve to a public server, never an internal one.
+async function publicHost(host) { try { const r = await dnsp.lookup(host, { all: true }); return r.length > 0 && !r.some(x => srcRules.privateAddress(x.address)); } catch (e) { return false; } }
+const buildSource = async b => {
+  const row = srcRules.build(b, { companyIds: COMPANIES.map(c => c.id), version: SRC_VERSION });
+  if (row.kind === 'feed' && !(await publicHost(new URL(row.config.url).hostname))) { const e = new Error('We could not reach that website, or it points to a private network.'); e.code = 400; throw e; }
+  return row;
+};
+
 // ---------- digests (email per person, Telegram per channel) ----------
 const siteBase = () => (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT).replace(/\/$/, '');
 const digestGroups = (freq, skip = new Set()) => {
@@ -825,6 +850,46 @@ http.createServer((req, res) => {
           if (j.action === 'approve') db.prepare(`update ${t} set verified=1 where verified=0`).run(); else db.prepare(`delete from ${t} where verified=0`).run();
         }
         return reply(200, { ok: true, count });
+      }
+      // Source management: list with health, pause / resume, refresh now, test an address, add, remove.
+      if (p === '/api/admin/sources' && req.method === 'GET') { if (!needAdmin()) return; const rows = sourceRows(); return reply(200, { summary: sourceSummary(rows), sources: rows }); }
+      if (p === '/api/admin/sources/toggle' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        if (!db.prepare('select 1 from sources_config where id=?').get(j.id)) return reply(404, { error: 'No such source.' });
+        db.prepare('update sources_config set enabled=? where id=?').run(j.enabled ? 1 : 0, j.id);
+        return reply(200, { ok: true, source: sourceRows(j.id)[0] });
+      }
+      if (p === '/api/admin/sources/refresh' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        if (limited('src-refresh:' + uid, 30)) return reply(429, { error: 'Slow down: up to 30 refreshes a minute.' });
+        const r = await runOne(db, String(j.id || ''));
+        if (r === undefined) return reply(404, { error: 'No such source.' });
+        if (r === null) return reply(409, { error: 'A full ingestion run is in progress. Try again in a minute.' });
+        for (const x of r.inserted) { const e = db.prepare('select * from events where id=?').get(x.id); if (e) await notify(e).catch(err => console.error('notify failed:', err.message)); }
+        return reply(200, { ok: r.status !== 'error', result: { status: r.status, message: r.message, items: r.items, created: r.created }, source: sourceRows(j.id)[0] });
+      }
+      if (p === '/api/admin/sources/test' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        if (limited('src-test:' + uid, 20)) return reply(429, { error: 'Slow down: up to 20 tests a minute.' });
+        const row = await buildSource(j);
+        try { return reply(200, { ok: true, id: row.id, label: row.label, ...(await probe(row.kind, row.config)) }); } catch (e) { return reply(200, { ok: false, id: row.id, label: row.label, error: e.message }); }
+      }
+      if (p === '/api/admin/sources/add' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        const row = await buildSource(j), all = db.prepare('select id,kind,config from sources_config').all();
+        if (all.length >= 300) return reply(400, { error: 'You have reached the limit of 300 sources.' });
+        const same = all.find(x => x.id === row.id || (x.kind === row.kind && (() => { const a = parseJson(x.config, {}), b = row.config; return row.kind === 'github' ? a.owner === b.owner && a.repo === b.repo : row.kind === 'feed' ? a.url === b.url : a.author === b.author; })()));
+        if (same) return reply(409, { error: 'That source is already in the list.', id: same.id });
+        db.prepare('insert into sources_config(id,kind,label,config,enabled) values(?,?,?,?,1)').run(row.id, row.kind, row.label, JSON.stringify(row.config));
+        const r = await runOne(db, row.id); // first read now, so the admin sees at once whether it works
+        return reply(200, { ok: true, result: r ? { status: r.status, message: r.message, items: r.items, created: r.created } : { status: 'new', message: 'Added. It will be read in the next run.' }, source: sourceRows(row.id)[0] });
+      }
+      if (p === '/api/admin/sources/remove' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        const id = String(j.id || ''); if (!db.prepare('select 1 from sources_config where id=?').get(id)) return reply(404, { error: 'No such source.' });
+        if (BUILTIN.has(id)) return reply(400, { error: 'Built-in sources cannot be removed. Pause it instead.' });
+        db.prepare('delete from ingestion_log where source_id=?').run(id); db.prepare('delete from sources_config where id=?').run(id);
+        return reply(200, { ok: true });
       }
       if (p === '/api/admin/sources' && req.method === 'POST') { if (!needAdmin()) return; db.prepare('update sources_config set enabled=? where id=?').run(j.enabled ? 1 : 0, j.id); return reply(200, { ok: true }); }
       if (p === '/api/admin/ingest/run' && req.method === 'POST') {
