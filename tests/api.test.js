@@ -21,6 +21,11 @@ test.before(async () => {
     { id: 'Qwen/Qwen3-Coder-27B', createdAt: iso(2), likes: 40, downloads: 9000, tags: ['text-generation', 'license:apache-2.0'], pipeline_tag: 'text-generation' },
     { id: 'Qwen/Qwen3-8B', createdAt: iso(50), likes: 12, downloads: 4000, tags: ['text-generation', 'license:apache-2.0'], pipeline_tag: 'text-generation' },
     { id: 'someone/old', createdAt: iso(500), likes: 1, downloads: 5, tags: [], pipeline_tag: 'text-generation' }]));
+  // Three papers: two name Qwen, one names OpenAI (entities is the list of labs a paper names).
+  const ip = db.prepare('insert into papers(id,title,date,published_at,url,verified,entities,primary_cat,verification,source_type,source_role,arxiv_id) values(?,?,?,?,?,1,?,?,?,?,?,?)');
+  ip.run('arxiv:2610.00001', 'Qwen scaling study', iso(30).slice(0, 10), iso(30).slice(0, 10), 'https://arxiv.org/abs/2610.00001', '["qwen"]', 'cs.CL', 'source_verified', 'arxiv', 'primary', '2610.00001');
+  ip.run('arxiv:2610.00002', 'Qwen3 technical report', iso(10).slice(0, 10), iso(10).slice(0, 10), 'https://arxiv.org/abs/2610.00002', '["qwen"]', 'cs.CL', 'source_verified', 'arxiv', 'primary', '2610.00002');
+  ip.run('arxiv:2610.00003', 'A GPT study', iso(5).slice(0, 10), iso(5).slice(0, 10), 'https://arxiv.org/abs/2610.00003', '["openai"]', 'cs.LG', 'source_verified', 'arxiv', 'primary', '2610.00003');
   db.close();
   child = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, DB: dbFile, DISABLE_INGEST: 'true' }, stdio: 'ignore', cwd: path.join(__dirname, '..') });
   for (let i = 0; i < 50; i++) { try { await api('/api/status'); return; } catch (e) { await new Promise(r => setTimeout(r, 100)); } }
@@ -229,4 +234,16 @@ test('lab radar: every lab reports its activity state, sources and last signal; 
   assert.ok(d.activity && d.activity.n30 === q.signals30d && d.activity.state === q.state, 'list and lab page agree');
   assert.ok(Array.isArray(d.recent) && d.recent.length <= 6 && d.recent.every((s, i, a) => !i || a[i - 1].ts >= s.ts), 'newest first');
   assert.strictEqual(d.activity.last, d.recent.length ? d.recent[0].ts : null, 'the last-signal date is the newest recent item');
+});
+
+test('models "Best first" puts publisher-confirmed models ahead of catalogue listings; paper lab counts match the lists; score rules come from the server', async () => {
+  const RANK = { verified: 0, source_verified: 1, aggregator_listed: 2 };
+  const m = (await api('/api/models?sort=best&limit=100')).body.items, ranks = m.map(x => RANK[x.verification] ?? 3);
+  assert.ok(m.length > 1 && ranks.every((r, i) => !i || ranks[i - 1] <= r), 'verification tier never goes back up');
+  const labs = (await api('/api/papers/labs')).body; 
+  assert.strictEqual(labs.total, 3); assert.deepStrictEqual(labs.labs.map(l => [l.id, l.n]), [['qwen', 2], ['openai', 1]]); assert.ok(labs.labs.every((l, i, a) => l.n > 0 && l.name && (!i || a[i - 1].n >= l.n)), 'labs are listed by paper count');
+  for (const l of labs.labs.slice(0, 3)) assert.strictEqual((await api('/api/papers?company=' + l.id + '&limit=1')).body.total, l.n, 'the count equals what the filter returns for ' + l.id);
+  assert.strictEqual((await api('/api/papers/labs?q=zzzznomatch')).body.labs.length, 0);
+  const sc = (await api('/api/status')).body.score;
+  assert.ok(Math.abs(Object.values(sc.weights).reduce((a, b) => a + b, 0) - 1) < 1e-9 && sc.significant === 60 && sc.major === 80);
 });
