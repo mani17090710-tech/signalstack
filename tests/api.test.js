@@ -247,3 +247,33 @@ test('models "Best first" puts publisher-confirmed models ahead of catalogue lis
   const sc = (await api('/api/status')).body.score;
   assert.ok(Math.abs(Object.values(sc.weights).reduce((a, b) => a + b, 0) - 1) < 1e-9 && sc.significant === 60 && sc.major === 80);
 });
+
+test('admin sources: health list, pause / resume, refresh, validation, add and remove', async () => {
+  const base = `http://127.0.0.1:${port}`, call = async (path, method, body, cookie) => { const r = await fetch(base + path, { method, headers: { cookie }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  assert.strictEqual((await call('/api/admin/sources', 'GET')).status, 401);
+  const cookie = (await fetch(base + '/api/login', { method: 'POST', body: JSON.stringify({ email: 'a@b.co', password: 'longenough' }) })).headers.get('set-cookie').split(';')[0];
+  let r = (await call('/api/admin/sources', 'GET', null, cookie)).body;
+  const STATES = ['failing', 'stale', 'warning', 'new', 'healthy', 'paused'];
+  assert.ok(r.summary.total > 20 && r.sources.length === r.summary.total && r.sources.every(s => STATES.includes(s.state) && Array.isArray(s.history) && s.watch && typeof s.builtin === 'boolean'));
+  const idx = r.sources.map(s => STATES.indexOf(s.state)); assert.ok(idx.every((v, i) => !i || idx[i - 1] <= v), 'worst first');
+  assert.ok(r.sources.find(s => s.id === 'hf-org-qwen').builtin && r.sources.find(s => s.id === 'hf-org-qwen').watch_url);
+  // pause and resume
+  let t = (await call('/api/admin/sources/toggle', 'POST', { id: 'hf-org-qwen', enabled: false }, cookie)).body; assert.strictEqual(t.source.state, 'paused');
+  t = (await call('/api/admin/sources/toggle', 'POST', { id: 'hf-org-qwen', enabled: true }, cookie)).body; assert.strictEqual(t.source.enabled, true); assert.notStrictEqual(t.source.state, 'paused');
+  assert.strictEqual((await call('/api/admin/sources/toggle', 'POST', { id: 'nope', enabled: false }, cookie)).status, 404);
+  // refresh a source that reads a local file, so this needs no network
+  const rf = await call('/api/admin/sources/refresh', 'POST', { id: 'curated-models' }, cookie);
+  assert.strictEqual(rf.status, 200); assert.ok(['ok', 'unchanged'].includes(rf.body.result.status), rf.body.result.message); assert.ok(rf.body.source.last_run && rf.body.source.history.length >= 1);
+  assert.strictEqual((await call('/api/admin/sources/refresh', 'POST', { id: 'nope' }, cookie)).status, 404);
+  // validation: nothing unsafe or malformed is accepted
+  for (const b of [{ kind: 'feed', url: 'http://example.com/rss' }, { kind: 'feed', url: 'https://localhost/rss' }, { kind: 'feed', url: 'https://169.254.169.254/x' }, { kind: 'github', repo: 'x' }, { kind: 'huggingface', author: '' }, { kind: 'arxiv' }])
+    for (const path of ['test', 'add']) assert.strictEqual((await call('/api/admin/sources/' + path, 'POST', b, cookie)).status, 400, path + ' ' + JSON.stringify(b));
+  // add (whatever the network says about it, the source is saved and reports its first result), refuse a duplicate, then remove
+  const add = await call('/api/admin/sources/add', 'POST', { kind: 'github', repo: 'no-such-org-xyz/no-such-repo-xyz' }, cookie);
+  assert.strictEqual(add.status, 200); assert.strictEqual(add.body.source.id, 'gh-no-such-org-xyz-no-such-repo-xyz'); assert.strictEqual(add.body.source.builtin, false);
+  assert.strictEqual((await call('/api/admin/sources/add', 'POST', { kind: 'github', repo: 'https://github.com/no-such-org-xyz/no-such-repo-xyz' }, cookie)).status, 409, 'same repo, different spelling');
+  assert.strictEqual((await call('/api/admin/sources/add', 'POST', { kind: 'github', repo: 'huggingface/transformers' }, cookie)).status, 409, 'already a built-in source');
+  assert.strictEqual((await call('/api/admin/sources/remove', 'POST', { id: 'hf-org-qwen' }, cookie)).status, 400, 'built-in sources can only be paused');
+  assert.strictEqual((await call('/api/admin/sources/remove', 'POST', { id: add.body.source.id }, cookie)).status, 200);
+  assert.ok(!(await call('/api/admin/sources', 'GET', null, cookie)).body.sources.some(s => s.id === add.body.source.id));
+});

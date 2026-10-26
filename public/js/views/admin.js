@@ -1,13 +1,16 @@
 // Admin: source health, review queue, users, test email.
 import { api, html, pageHead, $, mount, ago } from '../lib.js';
+import * as sourcesView from './admin-sources.js';
+import { adminTabs } from './admin-sources.js';
 
-export async function render() {
+export async function render(arg = '') {
+  if (arg === 'sources') return sourcesView.render();
   const [s, log, pend, users] = await Promise.all([api('/admin/summary'), api('/admin/log'), api('/admin/pending'), api('/admin/users')]);
   const reviewList = (kind, items, label) => html`<div class="panel"><h3>${label} (${items.length})</h3>${items.length ? html`<p class="tags mt"><button class="mini" data-bulk="${kind}" data-bulkact="approve">Approve all</button><button class="mini" data-bulk="${kind}" data-bulkact="reject">Reject all</button></p>` : ''}
     <div class="rows">${items.map(i => html`<div>${i.name || i.title}<p class="tags"><button class="mini" data-rev="${i.id}" data-type="${kind}" data-act="approve">Approve</button><button class="mini" data-rev="${i.id}" data-type="${kind}" data-act="reject">Reject</button></p></div>`)}${items.length ? '' : html`<div class="na">Nothing pending.</div>`}</div></div>`;
   return {
     title: 'Admin',
-    html: html`${pageHead('Admin', 'Source health, review queue and users.')}
+    html: html`${adminTabs('overview')}${pageHead('Admin', 'Source health, review queue and users.')}
           <section class="blk">
         <header><h2>Database backup</h2></header>
         <p class="fine">Download a copy of your SignalStack database.</p>
@@ -17,8 +20,9 @@ export async function render() {
       <p class="snapshot">${[['Users', s.users], ['Models', s.models], ['Papers', s.papers], ['Signals', s.events], ['Pending review', s.pendingModels + s.pendingPapers], ['Emails sent', s.emailsSent], ['Emails failed', s.emailsFailed]].map(([l, n]) => html`<span><b>${n}</b>${l}</span>`)}</p>
       ${s.emailConfigured ? '' : html`<p class="warn mt">Email is not set up. Add RESEND_API_KEY to the environment to enable email alerts.</p>`}
       <section class="blk"><header><h2>Test email</h2></header><div class="toolbar"><input id="temail" type="email" placeholder="Send a test email to" aria-label="Test email address"><button id="tsend">Send test email</button></div><div id="tresult"></div></section>
-      <section class="blk"><header><h2>Monitored sources</h2><button id="runnow">Run ingestion now</button></header>
-        <div class="panel rows">${s.sources.map(x => html`<div><b>${x.label}</b><p class="meta">${x.kind}, last run ${x.last_run ? ago(x.last_run) : 'never'}, <span class="${x.last_status === 'error' ? 'bad' : x.last_status === 'warning' ? 'warn-t' : 'ok'}">${x.last_status || 'not run yet'}</span>${x.last_error ? ' ' + x.last_error : ''}</p><button class="mini" data-src="${x.id}" data-on="${x.enabled ? '0' : '1'}">${x.enabled ? 'Disable' : 'Enable'}</button></div>`)}</div></section>
+      <section class="blk"><header><h2>Sources</h2><a class="btn-sec" href="#admin/sources">Manage sources</a></header>
+        <div class="panel"><p class="snapshot">${[['Sources', s.sources.length], ['Working', s.sources.filter(x => x.enabled && x.last_status !== 'error' && x.last_run).length], ['Failing', s.sources.filter(x => x.enabled && x.last_status === 'error').length], ['Paused', s.sources.filter(x => !x.enabled).length]].map(([l, n]) => html`<span><b>${n}</b>${l}</span>`)}</p>
+          ${s.sources.some(x => x.enabled && x.last_status === 'error') ? html`<p class="warn mt">${s.sources.filter(x => x.enabled && x.last_status === 'error').length} source(s) failed on their last run. <a href="#admin/sources">See which</a>.</p>` : html`<p class="fine mt">Pause, refresh, add or remove sources on the Sources page. <button class="link" id="runnow">Run ingestion now</button></p>`}</div></section>
       <section class="blk"><header><h2>Review queue</h2></header><div class="two">${reviewList('model', pend.models, 'Models')}${reviewList('paper', pend.papers, 'Papers')}</div><p class="fine">Items only wait here when REQUIRE_REVIEW is set to true.</p></section>
       <section class="blk"><header><h2>Ingestion log</h2></header><div class="tw"><table><tr><th>Time</th><th>Source</th><th>Status</th><th>Message</th></tr>${log.map(l => html`<tr><td>${l.ts.replace('T', ' ').slice(0, 16)}</td><td>${l.source_id}</td><td class="${l.status === 'error' ? 'bad' : 'ok'}">${l.status}</td><td>${l.message}</td></tr>`)}${log.length ? '' : html`<tr><td colspan="4" class="na">No runs yet.</td></tr>`}</table></div></section>
       <section class="blk"><header><h2>Users</h2></header><div class="panel rows">${users.map(u => html`<div>${u.email} ${u.role === 'admin' ? html`<span class="tag">admin</span>` : ''} <button class="mini" data-id="${u.id}" data-role="${u.role === 'admin' ? 'user' : 'admin'}">${u.role === 'admin' ? 'Demote' : 'Make admin'}</button></div>`)}</div></section>`,
