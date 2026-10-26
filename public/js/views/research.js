@@ -15,20 +15,34 @@ const paper = p => html`<article class="sig src-arx">
   ${p.summary ? html`<details class="why"><summary>Abstract</summary><p class="detail">${p.summary}</p>${p.abstract_truncated ? html`<p class="fine">Shortened in our records. Open the paper on arXiv for the full abstract.</p>` : ''}</details>` : ''}
   <div class="sc-act">${safeUrl(p.url) ? html`<a class="btn-src" href="${p.url}" target="_blank" rel="noopener noreferrer">Open on arXiv <span aria-hidden="true">↗</span></a>` : ''}${saveBtn('paper', p.arxiv_id)}<span class="sc-fine">${p.source_role === 'primary' ? 'Primary record from arXiv' : 'Secondary source'}${p.last_checked || p.retrieved_at ? ` · checked ${ago(p.last_checked || p.retrieved_at)}` : ''}</span></div></article>`;
 
-export async function render() {
+export async function render(arg = '') {
+  // A link can preselect a lab, for example #research/company=qwen (used by the "All research" link on lab pages).
+  if (arg) { const a = new URLSearchParams(arg); f.company = a.get('company') || ''; f.q = ''; f.window = ''; }
   return {
     title: 'Research',
     html: html`${pageHead('Research', 'Recent papers from selected arXiv categories (cs.CL, cs.LG, cs.AI, cs.CV and a few related ones). Not every arXiv paper is collected. Labs are listed only where the title or abstract names them.', html`<span id="rchk"></span>`)}
       <div class="toolbar tb-main"><input id="rq" type="search" placeholder="Search title, author, topic or arXiv ID" value="${f.q}" aria-label="Search papers">
         <select id="rco" aria-label="Lab mentioned"><option value="">Any lab mentioned</option></select>
         <select id="rwin" aria-label="Time">${WINDOWS.map(([k, l]) => html`<option value="${k}" ${f.window === k ? 'selected' : ''}>${l}</option>`)}</select></div>
+      <div class="labchips" id="rlabs" role="group" aria-label="Labs mentioned in these papers"></div>
       <p class="checked" id="rcount" aria-live="polite"></p><div id="rlist">${skeleton(3)}</div><p class="more"><button id="rmore" hidden>Load more</button></p>`,
     after(root) {
       // Lab names fill in as soon as they arrive; the first list waits for them only so tags show names, never raw ids.
       const cos = api('/companies').then(list => {
         COMPANY_NAMES = Object.fromEntries(list.map(c => [c.id, c.name]));
-        const sel = $('#rco', root); if (sel && root.contains(sel)) sel.insertAdjacentHTML('beforeend', list.map(c => String(html`<option value="${c.id}" ${f.company === c.id ? 'selected' : ''}>${c.name}</option>`)).join(''));
       }).catch(() => {});
+      // Only labs that have papers under the current search and time range are offered, each with its count, so a pick never leads to an empty page.
+      let labTok = 0;
+      const loadLabs = async () => {
+        const my = ++labTok;
+        try {
+          const d = await api('/papers/labs?' + new URLSearchParams({ ...(f.q && { q: f.q }), ...(f.window && { days: f.window }) })); if (my !== labTok) return;
+          const labs = d.labs.slice(); if (f.company && !labs.some(l => l.id === f.company)) labs.push({ id: f.company, name: COMPANY_NAMES[f.company] || f.company, n: 0 });
+          const top = labs.slice(0, 8); if (f.company && !top.some(l => l.id === f.company)) top.push(labs.find(l => l.id === f.company));
+          mount($('#rlabs', root), labs.length ? html`<button class="chipf ${f.company ? '' : 'on'}" data-lab="">Any lab <span class="cnt">${d.total}</span></button>${top.map(l => html`<button class="chipf ${f.company === l.id ? 'on' : ''}" data-lab="${l.id}" aria-pressed="${f.company === l.id}">${l.name} <span class="cnt">${l.n}</span></button>`)}` : html``);
+          const sel = $('#rco', root); if (sel) { sel.innerHTML = String(html`<option value="">Any lab mentioned</option>${labs.map(l => html`<option value="${l.id}" ${f.company === l.id ? 'selected' : ''}>${l.name} (${l.n})</option>`)}`); }
+        } catch (e) { /* the chips are an extra; the list still works */ }
+      };
       const load = async more => {
         const my = ++token, list = $('#rlist', root); if (!more) { rows = 0; mount(list, skeleton(3)); } else { $('#rmore', root).disabled = true; }
         try {
@@ -40,15 +54,16 @@ export async function render() {
           if (d.lastChecked) mount($('#rchk', root), checked(d.lastChecked));
         } catch (e) { if (my === token) { $('#rmore', root).disabled = false; mount(list, empty('Couldn’t load papers', e.message + '. Nothing was lost.', html`<button class="pri" data-retry>Try again</button>`)); } }
       };
-      let t; $('#rq', root).oninput = e => { clearTimeout(t); t = setTimeout(() => { f.q = e.target.value.trim(); load(); }, 250); };
-      $('#rco', root).onchange = e => { f.company = e.target.value; load(); };
-      $('#rwin', root).onchange = e => { f.window = e.target.value; load(); };
+      let t; $('#rq', root).oninput = e => { clearTimeout(t); t = setTimeout(() => { f.q = e.target.value.trim(); loadLabs(); load(); }, 250); };
+      $('#rco', root).onchange = e => { f.company = e.target.value; loadLabs(); load(); };
+      $('#rwin', root).onchange = e => { f.window = e.target.value; loadLabs(); load(); };
       root.addEventListener('click', e => {
+        const lb = e.target.closest('[data-lab]'); if (lb) { f.company = lb.dataset.lab; loadLabs(); load(); return; }
         if (e.target.id === 'rmore') load(true);
         if (e.target.closest('[data-retry]')) load();
-        if (e.target.closest('[data-clear]')) { Object.assign(f, { q: '', company: '', window: '' }); $('#rq', root).value = ''; $('#rco', root).value = ''; $('#rwin', root).value = ''; load(); }
+        if (e.target.closest('[data-clear]')) { Object.assign(f, { q: '', company: '', window: '' }); $('#rq', root).value = ''; $('#rco', root).value = ''; $('#rwin', root).value = ''; loadLabs(); load(); }
       });
-      load();
+      loadLabs(); load();
     },
   };
 }

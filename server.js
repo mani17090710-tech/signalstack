@@ -192,6 +192,8 @@ get(/^\/api\/status$/, () => {
     counts: { models: db.prepare('select count(*) c from models where verified=1').get().c, papers: db.prepare('select count(*) c from papers where verified=1').get().c,
       eventsWeek: db.prepare("select count(*) c from events e where e.ts>=datetime('now','-7 day') and " + EV_OK).get().c, benchmarks: c('benchmarks'), docs: c('doc_versions') },
     verification: Object.fromEntries(STATUSES.map(v => [v, db.prepare('select count(*) c from models where verified=1 and verification=?').get(v).c])),
+    // The Signal Score rules, so every "Why this score" panel shows the real weights and thresholds instead of a copy that could drift.
+    score: { weights: WEIGHTS, significant: SIGNIFICANT, major: 80 },
     // Said plainly so nothing downstream claims more than this: what the lists cover and what they do not.
     coverage: 'SignalStack tracks official lab releases and models with real traction on Hugging Face, models listed in the OpenRouter catalogue, and papers from selected arXiv categories. It does not claim to list every AI model or paper.',
     lastUpdate: lastChecked(),
@@ -256,6 +258,8 @@ get(/^\/api\/signals\/facets$/, () => ({
 const MODEL_ORDER = {
   new: 'coalesce(m.released_at,m.rel) desc', popular: 'm.likes desc', downloads: 'm.downloads desc',
   params: 'm.param_count desc nulls last', trending: 'm.trend_rank is null, m.trend_rank',
+  // Best first: confirmed by the publisher before catalogue listings, then models with their basic facts filled in (size or context, licence, date), newest first within each group.
+  best: "case m.verification when 'verified' then 0 when 'source_verified' then 1 when 'aggregator_listed' then 2 else 3 end, ((m.param_count is not null or m.ctx_tokens is not null) + (m.license is not null) + (m.released_at is not null)) < 3, coalesce(m.released_at,m.rel) desc",
 };
 get(/^\/api\/models$/, ({ q }) => {
   const { limit, offset } = pageOf(q), t = (q.get('q') || '').trim();
@@ -401,6 +405,14 @@ const paperOut = (x, full) => ({
   categories: (x.categories || x.primary_cat || x.arch || '').split(',').filter(Boolean), entities: parseJson(x.entities, []),
   verification: x.verification || 'source_verified', verification_label: VER_LABEL[x.verification] || VER_LABEL.source_verified,
   source_type: x.source_type || 'arxiv', source_role: x.source_role || 'primary', retrieved_at: x.retrieved_at, last_checked: x.last_checked || x.retrieved_at || null,
+});
+// Labs named in papers, with how many papers name each (for the same search and time range), so the filter only offers labs that have something to show.
+get(/^\/api\/papers\/labs$/, ({ q }) => {
+  const t = (q.get('q') || '').trim(), days = Math.min(Math.max(+q.get('days') || 0, 0), 3650), since = days ? new Date(Date.now() - days * 864e5).toISOString().slice(0, 10) : null;
+  const rows = db.prepare(`select j.value id, count(*) n from papers p, json_each(case when json_valid(p.entities) then p.entities else '[]' end) j where p.verified=1
+    and (?1 is null or p.title like ?1 escape '\\' or coalesce(p.abstract,p.tldr) like ?1 escape '\\' or p.authors like ?1 escape '\\' or p.arxiv_id like ?1 escape '\\') and (?2 is null or substr(coalesce(p.published_at,p.date),1,10) >= ?2) group by j.value order by n desc`).all(t ? likeOf(t) : null, since);
+  const total = db.prepare("select count(*) c from papers p where p.verified=1 and (?1 is null or p.title like ?1 escape '\\' or coalesce(p.abstract,p.tldr) like ?1 escape '\\' or p.authors like ?1 escape '\\' or p.arxiv_id like ?1 escape '\\') and (?2 is null or substr(coalesce(p.published_at,p.date),1,10) >= ?2)").get(t ? likeOf(t) : null, since).c;
+  return { total, labs: rows.filter(r => byId(r.id)).map(r => ({ id: r.id, name: byId(r.id).name, n: r.n })) };
 });
 get(/^\/api\/papers$/, ({ q }) => {
   const t = (q.get('q') || '').trim(), { limit, offset } = pageOf(q), co = q.get('company');
