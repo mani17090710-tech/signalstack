@@ -345,3 +345,9 @@ test('trust pages: public sources summary, report form validation, honeypot, rat
   for (let i = 0; i < 4; i++) await call('/api/report', 'POST', { kind: 'other', message: 'Another ordinary message number ' + i });
   assert.strictEqual((await call('/api/report', 'POST', { kind: 'other', message: 'One message too many from this address' })).status, 429);
 });
+
+test('app shell: service worker and the static loading shell are served', async () => {
+  const base = `http://127.0.0.1:${port}`;
+  const sw = await fetch(base + '/sw.js'); assert.strictEqual(sw.status, 200); assert.match(sw.headers.get('content-type'), /javascript/); assert.match(await sw.text(), /ss-shell/);
+  const html = await (await fetch(base + '/')).text(); assert.match(html, /Waking up the signal engine/); assert.match(html, /class="boot"/);
+});

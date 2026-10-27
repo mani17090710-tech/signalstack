@@ -21,7 +21,9 @@ export async function render() {
   const win = d.usedWindow === '24h' ? 'the last 24 hours' : 'the last 7 days';
   return {
     title: 'Now',
-    html: html`<div class="hero-now">${pageHead('Today in AI', `The few things that matter right now, from ${win}, most important first.`, checked(d.lastChecked))}
+    html: html`<div class="hero-now"><section class="hero" aria-labelledby="hero-h"><h1 id="hero-h">Live AI signals from labs, papers, and model releases — ranked and source-checked.</h1>
+        <div class="hero-row">${checked(d.lastChecked)}<span class="hero-win">Showing ${win}</span></div>
+        <div class="hero-cta"><a class="btn-src" href="#signals/sort=score&window=7d">View Top Signals</a><a class="btn-sec" href="#methodology">How ranking works</a><a class="btn-sec" href="#digest">Subscribe</a></div></section>
       ${d.lead ? html`<section class="top-signal" aria-label="Top signal"><header><h2><span class="live-dot" aria-hidden="true"></span>Top signal</h2><a href="#signals">All signals</a></header>${leadCard(d.lead)}</section>` : ''}
       <p class="snapshot"><span><b>${num(d.counts.last24h)}</b>signals in 24 h</span><span><b>${num(d.counts.significant)}</b>scoring 60 or higher</span><span><b>${num(d.counts.models)}</b>models tracked</span><span><b>${num(d.counts.papers)}</b>paper${d.counts.papers === 1 ? '' : 's'} collected</span></p>
       ${trustBar({ week: d.counts.week, sources: d.counts.sources, lastChecked: d.lastChecked })}

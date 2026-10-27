@@ -22,7 +22,11 @@
 <link rel="stylesheet" href="/css/pages.css">
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div class="boot" aria-busy="true" aria-label="Loading Signalstack">
+  <header class="boot-top"><span class="boot-brand">Signalstack</span></header>
+  <main class="boot-main"><div class="skel"><div class="sk-list">
+    <div class="sk"><b class="sk-ring"></b><div><i></i><i></i><i></i></div></div><div class="sk"><b class="sk-ring"></b><div><i></i><i></i><i></i></div></div><div class="sk"><b class="sk-ring"></b><div><i></i><i></i><i></i></div></div>
+  </div><p class="boot-msg" role="status">Waking up the signal engine…</p></div></main></div></div>
 <dialog id="authdlg" aria-labelledby="authtitle"></dialog>
 <noscript><p style="padding:24px">Signalstack needs JavaScript to run.</p></noscript>
 <script type="module" src="/js/main.js"></script>
