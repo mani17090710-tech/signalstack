@@ -338,7 +338,7 @@ code { font: 13px ui-monospace, Menlo, Consolas, monospace; background: var(--pa
 .mrow { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: 10px 16px; align-items: start; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .mrow.is-hidden { opacity: .6; border-style: dashed; } .mrow.is-hidden h3 { text-decoration: line-through; }
 .m-score { display: grid; gap: 4px; justify-items: start; } .m-score small { font-size: 11.5px; color: var(--dim); }
-.m-in { width: 76px; font-size: 18px; font-weight: 700; text-align: center; padding: 6px 8px; }
+.m-scorein { width: 76px; font-size: 18px; font-weight: 700; text-align: center; padding: 6px 8px; }
 .m-main { min-width: 0; } .m-main h3 { margin: 0 0 4px; font-size: 15.5px; overflow-wrap: anywhere; }
 .m-meta { margin: 0; display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--mut); }
 .mchip { padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--line2); color: var(--cy); } .mchip.bad { color: #f87171; border-color: rgba(248, 113, 113, .4); }
@@ -347,4 +347,4 @@ code { font: 13px ui-monospace, Menlo, Consolas, monospace; background: var(--pa
 .m-edit { grid-column: 1 / -1; display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); } .m-edit label { font-size: 13px; color: var(--mut); } .m-edit textarea { width: 100%; }
 .sw-edit { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; font-size: 13.5px; background: rgba(251, 191, 36, .08); border: 1px solid rgba(251, 191, 36, .35); color: var(--ink); }
 @media (max-width: 860px) { .mrow { grid-template-columns: 1fr; } .m-score { grid-template-columns: auto auto 1fr; align-items: center; } .m-act { justify-content: flex-start; max-width: none; } .m-act .mini { flex: 1; } .otiles { grid-template-columns: repeat(2, 1fr); } }
-.m-in { color: var(--ink); background: var(--panel2); border: 1px solid var(--line2); border-radius: 8px; }
+.m-scorein { color: var(--ink); background: var(--panel2); border: 1px solid var(--line2); border-radius: 8px; }
