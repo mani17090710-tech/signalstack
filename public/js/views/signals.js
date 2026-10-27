@@ -3,6 +3,7 @@
 import { api, html, pageHead, signalCard, empty, checked, verLegend, skeleton, mount, $, VER } from '../lib.js';
 
 const WINDOWS = [['1h', 'Last hour'], ['6h', '6 hours'], ['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']];
+const SHORT = { '1h': 'last hour', '6h': 'last 6 hours', '24h': 'last 24 hours' };
 const f = { window: '24h', cat: '', company: '', verification: '', sort: 'time' };
 let shown = 0;
 // Types shown in the filter. A value can name several categories (comma-separated), which is how the Now page links to "all models" or "all lab updates".
@@ -16,7 +17,7 @@ export async function render(arg = '') {
     title: 'All signals',
     html: html`${pageHead('All signals', html`The full feed: every new model, paper and release as it is detected, newest first. Each card links to its original source. Want just the highlights? <a href="#now">See Now</a>.`, html`<span id="chk"><span class="upd"><i class="upd-dot" aria-hidden="true"></i>Checking…</span></span>`)}
       ${verLegend()}
-      <div class="toolbar"><div class="seg" role="group" aria-label="Time window">${WINDOWS.map(([k, l]) => html`<button data-win="${k}" class="${f.window === k ? 'on' : ''}">${l}</button>`)}</div></div>
+      <p class="fallback" id="fallback" role="status" hidden></p><div class="toolbar"><div class="seg" role="group" aria-label="Time window">${WINDOWS.map(([k, l]) => html`<button data-win="${k}" class="${f.window === k ? 'on' : ''}">${l}</button>`)}</div></div>
       <div class="toolbar">
         <select id="fc" aria-label="Type"><option value="">All types</option>${TYPES.map(([k, l]) => html`<option value="${k}" ${f.cat === k ? 'selected' : ''}>${l}</option>`)}</select>
         <select id="fco" aria-label="Lab"><option value="">All labs</option></select>
@@ -37,7 +38,14 @@ export async function render(arg = '') {
         else { more.disabled = true; more.textContent = 'Loading…'; }
         try {
           const q = new URLSearchParams({ window: f.window, sort: f.sort, limit: 25, offset: shown, ...(f.cat && { cat: f.cat }), ...(f.company && { company: f.company }), ...(f.verification && { verification: f.verification }) });
-          const d = await api('/signals?' + q);
+          let d = await api('/signals?' + q), widened = '';
+          // A very short window can look broken. If it is empty, show the latest 7 days instead and say so plainly.
+          if (!add && !d.items.length && SHORT[f.window]) {
+            const was = SHORT[f.window];
+            q.set('window', '7d'); const wide = await api('/signals?' + q);
+            if (wide.items.length) { d = wide; f.window = '7d'; widened = `No signals in the ${was}. Showing the latest 7-day results instead.`; root.querySelectorAll('[data-win].on').forEach(b => b.classList.remove('on')); root.querySelectorAll('.seg [data-win="7d"]').forEach(b => b.classList.add('on')); }
+          }
+          const fb = $('#fallback', root); if (fb) { fb.textContent = widened; fb.hidden = !widened; }
           const cards = d.items.map(signalCard);
           if (add) list.querySelector('.stack').insertAdjacentHTML('beforeend', cards.join('')); else mount(list, html`<div class="stack">${cards}</div>`);
           if (!add && !d.items.length) {
