@@ -167,8 +167,8 @@ dialog h2 { font-size: 22px; margin-bottom: 14px; } dialog form { display: grid;
   .two { grid-template-columns: 1fr; }
   .phead h1 { font-size: 24px; }
   .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; height: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); background: rgba(8, 14, 30, .96); backdrop-filter: blur(10px); border-top: 1px solid var(--line); }
-  .bottom a { display: grid; place-items: center; align-content: center; gap: 2px; color: var(--mut); font-size: 11px; font-weight: 500; min-height: 48px; }
-  .bottom a:hover { text-decoration: none; } .bottom a.on { color: var(--cy); }
+  .bottom a, .bottom button { display: grid; place-items: center; align-content: center; gap: 2px; color: var(--mut); font-size: 11px; font-weight: 500; min-height: 48px; }
+  .bottom button { background: none; border: 0; border-radius: 0; cursor: pointer; width: 100%; } .bottom a:hover { text-decoration: none; } .bottom a.on, .bottom button.on { color: var(--cy); }
   .bottom svg { width: 22px; height: 22px; }
   .sform { max-width: none; }
   .kv { grid-template-columns: 110px 1fr; }

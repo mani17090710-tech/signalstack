@@ -1,10 +1,10 @@
 // App shell: top bar, bottom navigation on phones, hash router, and the data every page shares.
-import { $, $$, api, html, raw, mount, state, failed, skeleton, ago, trustBar } from './lib.js';
+import { $, $$, api, html, raw, mount, state, failed, skeleton, ago, trustBar, net } from './lib.js';
 import { openAuth } from './auth.js';
 import { showIntro, introSeen } from './intro.js';
 import * as motion from './motion.js';
 import { initPreview } from './preview.js';
-import { initSuggest } from './suggest.js';
+import { initSuggest, remember } from './suggest.js';
 import * as savedMod from './saved.js';
 import * as home from './views/home.js';
 import * as signals from './views/signals.js';
@@ -31,7 +31,24 @@ const VIEWS = {
   search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], api: [apidocs, 'you'], digest: [digestView, 'you'], compare: [extras.compare, 'you'],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
-const NAV = [['now', 'Now'], ['models', 'Models'], ['signals', 'Signals'], ['research', 'Research'], ['you', 'You']];
+// Phones: five bottom tabs. Search and More are buttons (search opens the field, More opens a sheet with everything else).
+const NAV = [['now', 'Now'], ['signals', 'Signals'], ['models', 'Models']];
+ICON.search = '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'; ICON.more = '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>';
+const MORE_LINKS = [['research', 'Research', 'Papers and what they cite'], ['companies', 'Companies', 'Lab radar: who is shipping'], ['compare', 'Compare', 'Models side by side'], ['saved', 'Saved', 'Your saved items'], ['you', 'You', 'Follows, alerts and settings'], ['api', 'API, RSS and embed', 'Use the data elsewhere']];
+const IN_MORE = ['research', 'companies', 'company', 'family', 'compare', 'saved', 'you', 'api', 'digest', 'benchmarks', 'docs', 'watchlist', 'alerts', 'admin'];
+function drawMore() {
+  const m = state.me;
+  mount($('#moresheet'), html`<div class="ms-back" data-more-close></div><div class="ms-panel" role="dialog" aria-modal="true" aria-label="More"><header><h2>More</h2><button type="button" class="ms-x" data-more-close aria-label="Close">Close</button></header>
+    <nav>${MORE_LINKS.map(([k, l, d]) => html`<a href="#${k}"><b>${l}</b><small>${d}</small></a>`)}${m && m.role === 'admin' ? html`<a href="#admin"><b>Admin</b><small>Sources, signals, overview</small></a>` : ''}</nav>
+    <div class="ms-acct">${m ? html`<span>Signed in as <b>${m.name || m.email}</b></span><button type="button" id="mlo">Log out</button>` : html`<button type="button" class="pri" data-action="signup">Sign up</button><button type="button" data-action="login">Log in</button>`}</div></div>`);
+  if (m) $('#mlo').onclick = () => { setMore(false); $('#lo') && $('#lo').click(); };
+}
+function setMore(on) {
+  const sheet = $('#moresheet'); if (!sheet) return;
+  if (on) drawMore();
+  sheet.hidden = !on; document.body.classList.toggle('sheet-open', on); const b = $('#bmore'); if (b) b.setAttribute('aria-expanded', String(on));
+  if (on) { const f = sheet.querySelector('a'); f && f.focus(); } else if (b) b.focus({ preventScroll: true });
+}
 const PRIVATE = ['watchlist', 'alerts', 'admin', 'saved', 'digest'];
 
 function shell() {
@@ -39,20 +56,26 @@ function shell() {
       <a class="brand" href="#now" aria-label="Signalstack home"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="3.2" fill="#35d4f4"/><circle cx="16" cy="16" r="8" fill="none" stroke="#35d4f4" stroke-opacity=".6" stroke-width="1.6"/><circle cx="16" cy="16" r="12.5" fill="none" stroke="#35d4f4" stroke-opacity=".3" stroke-width="1.3"/></svg>Signalstack</a>
       <nav class="nav" aria-label="Main">${[['now', 'Now'], ['signals', 'Signals'], ['models', 'Models'], ['research', 'Research'], ['companies', 'Companies'], ['compare', 'Compare']].map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${l}</a>`)}</nav>
       <button type="button" class="sbtn" id="sopen" aria-label="Search" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-      <form class="sform" id="sf" role="search"><label class="sr" for="sq">Search</label><input id="sq" type="search" placeholder="Search models, labs, papers" autocomplete="off"><button type="button" class="sclose" id="sclose" aria-label="Close search">Cancel</button></form>
+      <form class="sform" id="sf" role="search"><label class="sr" for="sq">Search</label><input id="sq" type="search" placeholder="Search models, labs, papers" autocomplete="off"><kbd class="slash" aria-hidden="true">/</kbd><button type="button" class="sclose" id="sclose" aria-label="Close search">Cancel</button></form>
       <div class="acct" id="acct"></div>
     </header>
+    <div class="netbar" id="netbar" role="status" aria-live="polite" hidden></div>
     <main id="main" tabindex="-1"></main>
     <footer class="trust" id="trust" hidden></footer>
-    <nav class="bottom" aria-label="Main">${NAV.map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${rawSvg(k)}<span>${l}</span></a>`)}</nav>`);
+    <div class="moresheet" id="moresheet" hidden></div>
+    <nav class="bottom" aria-label="Main">${NAV.map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${rawSvg(k)}<span>${l}</span></a>`)}<button type="button" id="bsearch">${rawSvg('search')}<span>Search</span></button><button type="button" id="bmore" aria-haspopup="dialog" aria-expanded="false">${rawSvg('more')}<span>More</span></button></nav>`);
   const sq = $('#sq');
   // Typing shows quick suggestions (suggest.js); Enter opens the full results page. Typing never moves the person off the page they are on.
   initSuggest(sq, $('#sf'));
-  $('#sf').onsubmit = e => { e.preventDefault(); const v = sq.value.trim(); if (v.length >= 2) location.hash = 'search/' + encodeURIComponent(v); };
+  $('#sf').onsubmit = e => { e.preventDefault(); const v = sq.value.trim(); if (v.length >= 2) { remember(v); location.hash = 'search/' + encodeURIComponent(v); } };
   // Phones: the search is an icon that opens a full-width field over the header, and closes on Cancel, Escape or navigating.
   const top = $('.top'), setSearch = on => { top.classList.toggle('searching', on); $('#sopen').setAttribute('aria-expanded', String(on)); if (on) sq.focus(); };
   $('#sopen').onclick = () => setSearch(true); $('#sclose').onclick = () => { sq.value = ''; setSearch(false); };
   sq.addEventListener('keydown', e => { if (e.key === 'Escape') setSearch(false); });
+  $('#bsearch').onclick = () => { setMore(false); setSearch(true); }; $('#bmore').onclick = () => setMore($('#moresheet').hidden);
+  $('#moresheet').addEventListener('click', e => { if (e.target.closest('[data-more-close],a,[data-action]')) setMore(false); });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#moresheet').hidden) setMore(false); });
+  addEventListener('hashchange', () => setMore(false));
   addEventListener('hashchange', () => top.classList.remove('searching'));
   drawAcct();
 }
@@ -69,21 +92,32 @@ function drawTrust() {
   mount(f, html`${trustBar({ week: st.counts.eventsWeek, sources: st.sources && st.sources.total, lastChecked: st.lastUpdate })}<p>Every item links to its original source and says how far that source can be trusted. <a href="#api">API, RSS and embed</a></p>`); f.hidden = false;
 }
 let seq = 0;
-export async function route() {
+// Network status strip: "Updating signals…" while the server wakes up or while saved data is on screen, and a Retry button if it cannot be reached.
+let slowTimer = 0, staleHash = '', hold = false;
+const bar = (msg, retry) => { const b = $('#netbar'); if (!b) return; if (!msg) { b.hidden = true; return; } mount(b, html`${retry ? '' : html`<i class="spin" aria-hidden="true"></i>`}<span>${msg}</span>${retry ? html`<button type="button" data-action="reload">Retry</button>` : ''}`); b.hidden = false; };
+const savedAgo = at => 'saved ' + ago(new Date(at).toISOString());
+net.addEventListener('updating', e => { staleHash = location.hash; hold = true; bar(`Updating signals… Showing data ${savedAgo(e.detail.at)}.`); });
+net.addEventListener('failed', e => { staleHash = ''; hold = true; bar(`Couldn’t update just now. Showing data ${savedAgo(e.detail.at)}.`, true); });
+net.addEventListener('fresh', () => { hold = false; bar(''); if (staleHash && staleHash === location.hash) { staleHash = ''; route(true); } });
+export async function route(silent) {
+  clearTimeout(slowTimer); if (!silent) { hold = false; bar(''); }
   const [r, ...rest] = (location.hash.replace(/^#\/?/, '') || 'now').split('/'), arg = rest.join('/');
   const [view, navKey] = VIEWS[r] || [null, ''];
   $$('[data-nav]').forEach(a => a.classList.toggle('on', a.dataset.nav === navKey || a.dataset.nav === r));
+  const bm = $('#bmore'); if (bm) bm.classList.toggle('on', IN_MORE.includes(r));
   const main = $('#main'), mine = ++seq; document.body.dataset.route = r || 'now';
   if (!view) { mount(main, html`<div class="empty"><h3>Page not found</h3><p>That address doesn’t exist.</p><a href="#now">Go to Home</a></div>`); return; }
   if (PRIVATE.includes(r) && !state.me) { mount(main, you.gate()); return; }
-  mount(main, skeleton(4)); scrollTo(0, 0);
+  if (!silent) { mount(main, skeleton(4)); scrollTo(0, 0); slowTimer = setTimeout(() => { if (mine === seq) bar('Updating signals… The server may be waking up after a quiet spell, which can take up to a minute.'); }, 1500); }
   try {
     const out = await (view.render || view.default)(decodeURIComponent(arg));
+    clearTimeout(slowTimer); if (mine === seq && !hold) bar('');
     if (mine !== seq) return; // a newer navigation started; drop this result
     mount(main, out.html || out); if (out.after) out.after(main);
     motion.enter(main);
     document.title = (out.title ? out.title + ' | ' : '') + 'Signalstack';
   } catch (e) {
+    clearTimeout(slowTimer); if (mine === seq && !hold) bar('');
     if (mine !== seq) return;
     if (e.code === 401 && state.me) { state.me = null; state.watch = []; drawAcct(); return route(); }
     mount(main, e.code === 401 ? you.gate() : failed(e));

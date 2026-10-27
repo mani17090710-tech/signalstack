@@ -34,12 +34,13 @@ const CAP = {
 const MODAL = { text: 'Text', image: 'Images', audio: 'Audio', video: 'Video', file: 'Files' };
 
 const PARTS = {
-  impact: ['Impact', 'How fast people are downloading it since release.'],
-  popularity: ['Popularity', 'Likes and downloads, or likes of models that cite a paper.'],
-  technical: ['Technical', 'Its size: parameters, context window, or how big a release is.'],
-  relevance: ['Relevance', 'Whether a lab we track is behind it.'],
-  freshness: ['Freshness', 'How recent it is. This fades over about three days.'],
+  impact: ['Impact', 'How fast people picked it up: downloads per day since it came out.'],
+  popularity: ['Popularity', 'How much people use it: likes and downloads, or likes of models that cite a paper.'],
+  technical: ['Technical importance', 'How big it is: parameters, context window, or version size of a release.'],
+  relevance: ['Relevance', 'How closely it is tied to a lab we track. Official sources rate highest.'],
+  freshness: ['Freshness', 'How new it is. This fades over about three days.'],
 };
+const MISSING = { impact: 'No public adoption data available yet.', popularity: 'No public adoption data available yet.', technical: 'No public technical details available yet.', relevance: 'No link to a tracked lab available yet.', freshness: 'No publication date available yet.' };
 
 const ICON = {
   cube: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>',
@@ -110,7 +111,7 @@ export function explainer(d) {
   </section>`;
 
   const barRows = Object.keys(PARTS).map((k, i) => html`<div class="part2" data-i="${i}"><div class="p-top"><b>${PARTS[k][0]}</b><span class="p-w">${Math.round((s.weights ? s.weights[k] : 0) * 100)}% of score</span><span class="p-v">${s.parts[k] == null ? 'No data' : s.parts[k]}</span></div>
-    <span class="track2"><i data-v="${s.parts[k] == null ? 0 : s.parts[k]}"></i></span><p>${PARTS[k][1]}${s.parts[k] == null ? ' Left out of the score, not counted as zero.' : ''}</p></div>`);
+    <span class="track2"><i data-v="${s.parts[k] == null ? 0 : s.parts[k]}"></i></span><p>${s.parts[k] == null ? html`${MISSING[k]} Left out of the score, not counted as zero.` : PARTS[k][1]}</p></div>`);
   const score = html`<section class="ex-card panel ex-reveal ex-score"><h2>Signal Score</h2>
     <div class="score-head"><div class="ringbox"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" cx="60" cy="60" r="52" data-score="${s.score}"/></svg><b data-count="${s.score}">${s.score}</b></div>
       <div><span class="imp imp-${String(s.importance).toLowerCase()}">${s.importance}</span><p class="detail">SignalStack’s own estimate of how much attention this deserves right now, from 0 to 100. It is built from the five parts below.</p></div></div>

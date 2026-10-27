@@ -14,8 +14,19 @@ export function applyBars(root) { $$('[data-bar]', root).forEach(e => e.style.se
 
 // Requests give up after 25 s instead of spinning forever. A GET that fails because the host is still waking up (network error, 502/503/504)
 // is retried twice; writes are never retried, so nothing is submitted twice.
+//
+// Last-known data: every successful public GET is kept in localStorage. If the server is slow (Render's free tier sleeps), the page shows the
+// saved copy after a short wait and keeps asking in the background; when fresh data arrives main.js redraws the page. Personal and admin
+// endpoints are never saved, so nothing private is left behind on a shared computer.
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-export async function api(p, method = 'GET', body) {
+const CK = 'ss_c:', NO_CACHE = /^\/(me|admin|watch|watching|follows|saved|collections|digest|alerts|login|logout|signup|account|notif|forgot|reset|verify|unsub)/, WAIT_MS = 1200, MAX_AGE = 7 * 864e5;
+const cget = p => { try { const c = JSON.parse(localStorage.getItem(CK + p)); return c && Date.now() - c.t < MAX_AGE ? c : null; } catch (e) { return null; } };
+const cset = (p, d) => {
+  try { const v = JSON.stringify({ t: Date.now(), d }); if (v.length > 4e5) return; try { localStorage.setItem(CK + p, v); } catch (e) { Object.keys(localStorage).filter(k => k.startsWith(CK)).forEach(k => localStorage.removeItem(k)); localStorage.setItem(CK + p, v); } } catch (e) { /* storage unavailable */ }
+};
+export const net = new EventTarget();
+const tell = (type, detail) => net.dispatchEvent(new CustomEvent(type, { detail }));
+async function fetchJson(p, method, body) {
   for (let tries = 0; ; tries++) {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 25000);
     try {
@@ -30,6 +41,17 @@ export async function api(p, method = 'GET', body) {
       const e = new Error(x.name === 'AbortError' ? 'The server is taking too long to answer' : 'Could not reach the server'); e.code = x.name === 'AbortError' ? 'timeout' : 'offline'; throw e;
     } finally { clearTimeout(timer); }
   }
+}
+export async function api(p, method = 'GET', body) {
+  if (method !== 'GET' || NO_CACHE.test(p)) return fetchJson(p, method, body);
+  const hit = cget(p), net1 = fetchJson(p, method, body).then(d => { cset(p, d); return d; });
+  // Saved less than 30 s ago means the server is awake: just wait for it.
+  if (!hit || Date.now() - hit.t < 3e4) return net1;
+  const first = await Promise.race([net1.then(d => ({ d }), e => ({ e })), sleep(WAIT_MS).then(() => null)]);
+  if (first) { if (first.e) { tell('failed', { at: hit.t, error: first.e }); return hit.d; } return first.d; }
+  tell('updating', { at: hit.t });
+  net1.then(() => tell('fresh', { at: hit.t }), e => tell('failed', { at: hit.t, error: e }));
+  return hit.d;
 }
 
 export const state = { me: null, watch: [], follows: [], saved: new Set(), collections: [], status: { counts: {} }, whoReady: Promise.resolve() };
@@ -84,14 +106,18 @@ export const sourceLine = it => {
 };
 
 export const scoreRing = (score, big = false) => html`<span class="score ${score >= 80 ? 'hi' : score >= 60 ? 'mid' : 'lo'} ${big ? 'big' : ''}" role="img" aria-label="Signal Score ${score} out of 100"><b>${score}</b></span>`;
-const PART_LABEL = { impact: 'Impact', popularity: 'Popularity', technical: 'Technical', relevance: 'Relevance', freshness: 'Freshness' };
+// Plain-language names and explanations for each part of the score, and what to say when there is no data for it.
+const PART_LABEL = { freshness: 'Freshness', relevance: 'Relevance', technical: 'Technical importance', popularity: 'Popularity', impact: 'Impact' };
 const PART_HELP = {
-  impact: 'How fast people are adopting a model since it came out.',
-  popularity: 'Likes and downloads of the model (or of models that cite a paper).',
-  technical: 'Model size, or how big a software release is.',
-  relevance: 'Whether a lab we track is behind it.',
-  freshness: 'How recent it is. Fades over about three days.',
+  freshness: 'How new it is. Brand-new items rate highest and this fades over about three days.',
+  relevance: 'How closely it is tied to a lab we track. Official sources rate highest.',
+  technical: 'How big the model or release is: parameters or context window for models, version size for software.',
+  popularity: 'How much people use it: likes and downloads of the model, or of the models that cite a paper.',
+  impact: 'How fast people picked it up: downloads per day since it came out.',
 };
+const PART_MISSING = { popularity: 'No public adoption data available yet.', impact: 'No public adoption data available yet.', technical: 'No public technical details available yet.', relevance: 'No link to a tracked lab available yet.', freshness: 'No publication date available yet.' };
+const level = v => (v >= 70 ? 'High' : v >= 40 ? 'Medium' : 'Low');
+const EVIDENCE_HELP = 'How well the source backs this up. Shown for transparency; it does not change the number above.';
 const DEFAULT_SCORE = { weights: { impact: .2, popularity: .2, technical: .2, relevance: .25, freshness: .15 }, significant: 60, major: 80 };
 // "Why this score": the real weights and thresholds (from the server), what each part contributed, and the evidence behind it, so the number can be checked.
 export const scoreBreakdown = (s, open = false) => {
@@ -107,9 +133,10 @@ export const scoreBreakdown = (s, open = false) => {
   <div class="sw-grid" role="table" aria-label="How the score is built">
     <div class="sw-head" role="row"><span role="columnheader">Part</span><span role="columnheader">Rating</span><span role="columnheader" class="sw-n">Weight</span><span role="columnheader" class="sw-n">Adds</span></div>
     ${keys.map(k => s.parts[k] == null
-      ? html`<div class="sw-row skip" role="row"><div class="sw-name"><b>${PART_LABEL[k]}</b><small>${PART_HELP[k]}</small></div><span class="sw-none">No data. Left out.</span></div>`
-      : html`<div class="sw-row" role="row"><div class="sw-name"><b>${PART_LABEL[k]}</b><small>${PART_HELP[k]}</small></div><span class="sw-bar"><span class="track"><i data-bar="${s.parts[k]}"></i></span><b class="sw-v">${s.parts[k]}</b></span><span class="sw-n sw-w">${Math.round(share(k) * 100)}%</span><span class="sw-n sw-add">+${pts[k]}</span></div>`)}
+      ? html`<div class="sw-row skip" role="row"><div class="sw-name"><b>${PART_LABEL[k]}</b><small>${PART_HELP[k]}</small></div><span class="sw-none">${PART_MISSING[k]} <em>Left out of the score.</em></span></div>`
+      : html`<div class="sw-row" role="row"><div class="sw-name"><b>${PART_LABEL[k]} <span class="sw-lvl lvl-${level(s.parts[k]).toLowerCase()}">${level(s.parts[k])}</span></b><small>${PART_HELP[k]}</small></div><span class="sw-bar"><span class="track"><i data-bar="${s.parts[k]}"></i></span><b class="sw-v">${s.parts[k]}</b></span><span class="sw-n sw-w">${Math.round(share(k) * 100)}%</span><span class="sw-n sw-add">+${pts[k]}</span></div>`)}
     <div class="sw-total" role="row"><span>${s.score_edited ? 'Calculated score' : 'Signal Score'}</span><b>${calc}</b></div></div>
+  ${(() => { const p = provenance(s); return html`<div class="sw-ev"><div class="sw-name"><b>Evidence quality <span class="sw-lvl ev-${p.tone}">${p.tone === 'ok' ? 'Strong' : p.tone === 'blue' ? 'Good' : p.tone === 'warn' ? 'Limited' : 'Basic'}</span></b><small>${EVIDENCE_HELP}</small></div><p>${p.title}. ${p.note}.</p></div>`; })()}
   ${skipped ? html`<p class="fine">${skipped} part${skipped === 1 ? ' has' : 's have'} no data here, so the remaining weights are scaled up to add to 100%.</p>` : html``}
   <div class="sw-scale" aria-label="Where this score sits"><span class="sw-seg n">Normal<small>under ${sc.significant}</small></span><span class="sw-seg i">Important<small>${sc.significant} to ${sc.major - 1}</small></span><span class="sw-seg m">Major<small>${sc.major}+</small></span><i class="sw-mark" data-bar="${s.score}" aria-hidden="true"></i></div>
   ${s.why.length ? html`<p class="sw-evh">What this is based on</p><ul>${s.why.map(w => html`<li>${w}</li>`)}</ul>` : ''}
