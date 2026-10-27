@@ -20,7 +20,7 @@ const cardOf = s => (mode === 'compact' ? compactRow(s) : signalCard(s));
 export async function render(arg = '') {
   mode = getView();
   // A link from Now can preselect filters, for example #signals/cat=Research&window=7d
-  if (arg) { const a = new URLSearchParams(arg); f.cat = a.get('cat') || ''; f.company = a.get('company') || ''; f.verification = ''; if (WINDOWS.some(([k]) => k === a.get('window'))) f.window = a.get('window'); }
+  if (arg) { const a = new URLSearchParams(arg); f.cat = a.get('cat') || ''; f.company = a.get('company') || ''; f.verification = ''; if (WINDOWS.some(([k]) => k === a.get('window'))) f.window = a.get('window'); if (['time', 'score'].includes(a.get('sort'))) f.sort = a.get('sort'); }
   return {
     title: 'All signals',
     html: html`${pageHead('All signals', html`The full feed: every new model, paper and release as it is detected, newest first. Each card links to its original source. Want just the highlights? <a href="#now">See Now</a>.`, html`<span id="chk"><span class="upd"><i class="upd-dot" aria-hidden="true"></i>Checking…</span></span>`)}
@@ -31,7 +31,7 @@ export async function render(arg = '') {
         <select id="fc" aria-label="Type"><option value="">All types</option>${TYPES.map(([k, l]) => html`<option value="${k}" ${f.cat === k ? 'selected' : ''}>${l}</option>`)}</select>
         <select id="fco" aria-label="Lab"><option value="">All labs</option></select>
         <select id="fv" aria-label="Verification"><option value="">Any verification</option>${Object.entries(VER).map(([v, x]) => html`<option value="${v}" ${f.verification === v ? 'selected' : ''}>${x[1]}</option>`)}</select>
-        <select id="fs" aria-label="Sort"><option value="time">Newest first</option><option value="score" ${f.sort === 'score' ? 'selected' : ''}>Highest score</option></select></div>
+        <select id="fs" aria-label="Sort"><option value="time" ${f.sort === 'time' ? 'selected' : ''}>Newest first</option><option value="score" ${f.sort === 'score' ? 'selected' : ''}>Highest score</option></select></div>
       <p class="checked" id="count" aria-live="polite"></p>
       <div id="list">${skeleton(3)}</div><p class="more"><button id="more" hidden>Show more</button></p>`,
     after(root) {

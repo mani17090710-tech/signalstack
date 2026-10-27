@@ -115,7 +115,7 @@ export async function route(silent) {
   const main = $('#main'), mine = ++seq; document.body.dataset.route = r || 'now';
   if (!view) { mount(main, html`<div class="empty"><h3>Page not found</h3><p>That address doesn’t exist.</p><a href="#now">Go to Home</a></div>`); return; }
   if (PRIVATE.includes(r) && !state.me) { mount(main, you.gate()); return; }
-  if (!silent) { mount(main, skeleton(4)); scrollTo(0, 0); slowTimer = setTimeout(() => { if (mine === seq) bar('Updating signals… The server may be waking up after a quiet spell, which can take up to a minute.'); }, 1500); }
+  if (!silent) { mount(main, skeleton(4)); scrollTo(0, 0); slowTimer = setTimeout(() => { if (mine === seq) bar('Waking up the signal engine… The free server sleeps when idle, so the first visit can take up to a minute.'); }, 1500); }
   try {
     const out = await (view.render || view.default)(decodeURIComponent(arg));
     clearTimeout(slowTimer); if (mine === seq && !hold) bar('');
@@ -134,6 +134,15 @@ export async function route(silent) {
 // Update every Follow button on screen to match what the person follows.
 function markFollows() {
   $$('[data-follow]').forEach(b => { const [kind, ...r] = b.dataset.follow.split('|'), on = state.follows.some(x => x.kind === kind && x.key === r.join('|')); b.textContent = on ? 'Following' : 'Follow'; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+}
+
+// Copy text to the clipboard, with a fallback for browsers or pages where the Clipboard API is blocked.
+async function copyText(text, done) {
+  try { await navigator.clipboard.writeText(text); } catch (x) {
+    const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.className = 'sr'; document.body.append(t); t.select();
+    try { document.execCommand('copy'); } catch (y) { t.remove(); return savedMod.toast('Could not copy. Select the text and copy it yourself.'); } t.remove();
+  }
+  savedMod.toast(done);
 }
 
 // One delegated click handler (CSP forbids inline handlers).
@@ -157,6 +166,17 @@ document.addEventListener('click', async e => {
     try { state.follows = await api('/follows', on ? 'DELETE' : 'POST', { kind, key }); } catch (x) { alert(x.message); }
     fo.disabled = false; markFollows();
     return;
+  }
+  const sh = e.target.closest('[data-share]');
+  if (sh) {
+    const { title, url } = sh.dataset, link = url || location.href;
+    if (navigator.share) { try { await navigator.share({ title, text: title, url: link }); } catch (x) { /* cancelled */ } return; }
+    return copyText(`${title} ${link}`, 'Link copied');
+  }
+  const ci = e.target.closest('[data-cite]');
+  if (ci) {
+    const { title, url, by, date } = ci.dataset, today = new Date().toISOString().slice(0, 10);
+    return copyText(`${title}. ${by}.${date ? ' Published ' + date + '.' : ''}${url ? ' ' + url + '.' : ''} Found on Signalstack (${location.origin}), retrieved ${today}.`, 'Citation copied');
   }
   const a = e.target.closest('[data-action]');
   if (a && a.dataset.action === 'reload') route();
@@ -200,3 +220,5 @@ setInterval(() => $$('[data-ts]').forEach(el => {
 // Play the intro when someone arrives at the front door (no link to a specific page), once per visit.
 if (!introSeen() && ['', 'now'].includes(location.hash.replace(/^#\/?/, ''))) showIntro(go);
 initPreview(); savedMod.initSaved();
+// Offline-friendly shell: the app opens from the saved copy while a sleeping server wakes up (see sw.js).
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => { /* optional */ }));

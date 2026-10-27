@@ -186,20 +186,30 @@ export const provBlock = s => {
   return html`<div class="prov prov-${p.tone}" title="${p.note}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(PROV_ICON[p.tone])}</svg><div class="prov-t"><b>${p.title}</b>${p.url ? html`<a href="${p.url}" target="_blank" rel="noopener noreferrer" title="${p.url}">${p.shown}</a>` : html`<span>Source link not available</span>`}</div></div>`;
 };
 
+// Hover / focus tooltip for the score: what it is built from, in three plain groups.
+const pv = v => (v == null ? 'no data' : Math.round(v));
+const scoreTip = s => `Signal Score ${s.score} of 100\nFreshness ${pv(s.parts.freshness)}: how new it is\nRelevance ${pv(s.parts.relevance)}: how closely it ties to a tracked lab\nImportance: technical ${pv(s.parts.technical)}, impact ${pv(s.parts.impact)}, popularity ${pv(s.parts.popularity)}\nOpen Details for the full breakdown`;
+const dateOnly = t => { const d = new Date(parse(t)); return isNaN(d) ? '' : d.toISOString().slice(0, 10); };
+
+// Order on every card: title, one-line summary, verification and source, score and age, Open source, then Save / Share / Copy citation.
+// Everything else (why it matters, provenance, score breakdown) sits behind Details. The lead card keeps "Why this matters" and provenance in view.
 const card = (s, lead) => {
   const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url), sum = plain(s.detail || (s.summary !== s.title ? s.summary : ''));
+  const matters = s.matters ? html`<p class="matters"><b>Why this matters</b>${s.matters} <span class="matters-note">${s.matters_edited ? 'Written by the SignalStack team.' : 'Written from the data, not by AI.'}</span></p>` : '';
   return html`<article class="sig src-${sk} ${lead ? 'sig-lead' : ''}">
-    <header class="sc-top">
-      <div class="sc-chips"><span class="sc-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(TYPE_ICON[type])}</svg>${type}</span><span class="srcb">${sname}</span><time class="sc-time" data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time></div>
-      ${scoreRing(s.score)}
-    </header>
-    <h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
-    ${sum ? html`<p class="sc-sum">${sum}</p>` : ''}
-    ${s.matters ? html`<p class="matters"><b>Why this matters</b>${s.matters} <span class="matters-note">${s.matters_edited ? 'Written by the SignalStack team.' : 'Written from the data, not by AI.'}</span></p>` : ''}
-    ${provBlock(s)}
-    <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}<span class="imp imp-${s.importance}">${s.importance}</span></div>
-    <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>${qlBtn(s.model_id)}` : ''}${saveBtn('signal', s.id)}</div>
-    ${scoreBreakdown(s)}</article>`;
+    <div class="sc-head">
+      <h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
+      <span class="tipw" tabindex="0" data-tip="${scoreTip(s)}" aria-label="${scoreTip(s).replace(/\n/g, '. ')}">${scoreRing(s.score)}</span>
+    </div>
+    ${sum ? html`<p class="sc-sum one">${sum}</p>` : ''}
+    <div class="sc-meta2">${verBadge(s.verification)}<span class="srcb">${sname}</span><span class="sc-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(TYPE_ICON[type])}</svg>${type}</span><time class="sc-time" data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time></div>
+    ${lead ? html`${matters}${provBlock(s)}` : ''}
+    <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open source for ${s.title}">Open source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}
+      <span class="sc-sec">${saveBtn('signal', s.id)}<button type="button" class="mini" data-share data-title="${s.title}" data-url="${url || ''}">Share</button><button type="button" class="mini" data-cite data-title="${s.title}" data-url="${url || ''}" data-by="${sname}${s.company ? ', ' + s.company : ''}" data-date="${dateOnly(s.ts)}">Copy citation</button></span></div>
+    <details class="more-details"><summary>Details</summary><div class="md-body">
+      ${lead ? '' : html`${matters}${provBlock(s)}`}
+      <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}<span class="imp imp-${s.importance}">${s.importance}</span>${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>${qlBtn(s.model_id)}` : ''}</div>
+      ${scoreBreakdown(s)}</div></details></article>`;
 };
 
 export const signalCard = s => card(s, false);
@@ -247,7 +257,7 @@ export const modelCard = m => {
 // Loading placeholder shaped like a signal card, so the page does not jump when the real cards arrive. After a few seconds it explains the wait
 // (pure CSS, no timers): free hosting sleeps when idle and the first request can take up to a minute.
 export const skeleton = (n = 4) => html`<div class="skel" aria-busy="true" aria-label="Loading"><div class="sk-list">${Array.from({ length: n }, () => html`<div class="sk"><b class="sk-ring"></b><div><i></i><i></i><i></i></div></div>`)}</div>
-  <p class="slow" role="status">Still loading. The server may be waking up after a quiet spell; the first visit can take up to a minute.</p></div>`;
+  <p class="slow" role="status">Waking up the signal engine… The free server sleeps when idle, so the first visit can take up to a minute.</p></div>`;
 const EMPTY_ICON = { signal: '<path d="M4 18a8 8 0 0 1 8-8m-8 8a14 14 0 0 1 14-14M4 18h.01"/>', filter: '<path d="M3 5h18l-7 8v6l-4-2v-4z"/>', data: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' };
 export const empty = (title, body, action, kind = 'data') => html`<div class="empty"><svg class="empty-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(EMPTY_ICON[kind] || EMPTY_ICON.data)}</svg><h3>${title}</h3><p>${body}</p>${action ? html`<div class="empty-act">${action}</div>` : ''}</div>`;
 export const failed = e => html`<div class="empty err"><svg class="empty-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw('<circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 3h.01"/>')}</svg><h3>This page didn’t load</h3><p>${e.message}. Your connection or the server may be slow; nothing was lost.</p><div class="empty-act"><button class="pri" data-action="reload">Try again</button></div></div>`;
