@@ -7,7 +7,7 @@ const CATS = [['Model Release', 'New model'], ['Trending', 'Trending'], ['Announ
 const PAGE = 40;
 
 const row = (s, openNote) => html`<article class="mrow ${s.hidden ? 'is-hidden' : ''}" data-id="${s.id}">
-  <div class="m-score"><label class="sr" for="sc${s.id}">Score for ${s.title}</label><input id="sc${s.id}" class="m-in" type="number" min="0" max="100" step="1" value="${s.score}" data-score inputmode="numeric">
+  <div class="m-score"><label class="sr" for="sc${s.id}">Score for ${s.title}</label><input id="sc${s.id}" class="m-scorein" type="number" min="0" max="100" step="1" value="${s.score}" data-score inputmode="numeric">
     <span class="imp imp-${s.importance}">${s.importance}</span>${s.score_edited ? html`<small>calculated ${s.calculated}</small>` : ''}</div>
   <div class="m-main"><h3>${safeUrl(s.url) ? html`<a href="${s.url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
     <p class="m-meta"><span class="sc-type">${signalType(s)}</span><span class="srcb">${sourceInfo(s)[1]}</span><span>${s.company || 'No lab'}</span><time title="${stamp(s.ts)}">${ago(s.ts)}</time>
