@@ -16,6 +16,7 @@ const { seriesOf } = require('./lib/family');
 const { matters } = require('./lib/matters');
 const pub = require('./lib/publicapi');
 const digest = require('./lib/digest');
+const moderation = require('./lib/moderation');
 const { scoreSignal, SIGNIFICANT, WEIGHTS, parseTs } = require('./lib/score');
 const { sendMail } = require('./mailer');
 const { runAll, runOne, probe, isRunning, enrichModel } = require('./ingest');
@@ -94,7 +95,9 @@ function serveLegal(res, name) {
 const parseJson = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (e) { return d; } };
 const WINDOWS = { '1h': '-1 hour', '6h': '-6 hours', '24h': '-1 day', '7d': '-7 days', '30d': '-30 days' };
 // Hide events about models/papers an admin has not approved (only matters when REQUIRE_REVIEW=true).
-const EV_OK = "(e.model_id is null or e.model_id in (select id from models where verified=1)) and not exists(select 1 from papers pp where pp.url=e.source and pp.verified=0)";
+const EV_BASE = "(e.model_id is null or e.model_id in (select id from models where verified=1)) and not exists(select 1 from papers pp where pp.url=e.source and pp.verified=0)";
+// What the public sees: the same, minus signals an editor has hidden.
+const EV_OK = EV_BASE + " and not exists(select 1 from signal_overrides ov where ov.event_id=e.id and ov.hidden=1)";
 const SEV = { Normal: 0, Important: 1, Research: 1, Major: 2, Critical: 3 }, MIN = { All: 0, 'Major only': 2, 'Critical only': 3 };
 
 // Capabilities come only from what the sources state: Hugging Face tags/tasks, OpenRouter's supported parameters and modalities.
@@ -125,26 +128,31 @@ function modelOut(m) {
 }
 const M_SELECT = 'select m.* from models m';
 
-const signalRows = (where, args, limit) => db.prepare(`select e.*, m.likes mlikes, m.downloads mdownloads, m.param_count mparams, m.released_at mreleased, m.company_id mcompany, m.name mname, m.verification mver, m.source_type msrc, m.ctx_tokens mctx
-  from events e left join models m on m.id=e.model_id where ${EV_OK} ${where} order by e.ts desc limit ${limit}`).all(...args);
+const signalRows = (where, args, limit, incHidden = false) => db.prepare(`select e.*, m.likes mlikes, m.downloads mdownloads, m.param_count mparams, m.released_at mreleased, m.company_id mcompany, m.name mname, m.verification mver, m.source_type msrc, m.ctx_tokens mctx
+  from events e left join models m on m.id=e.model_id where ${incHidden ? EV_BASE : EV_OK} ${where} order by e.ts desc limit ${limit}`).all(...args);
 
+const ovGet = db.prepare('select score,matters,hidden,updated_by,updated from signal_overrides where event_id=?');
 function signalOut(e) {
-  const meta = parseJson(e.meta, {}), co = e.company_id ? byId(e.company_id) : null;
+  const meta = parseJson(e.meta, {}), co = e.company_id ? byId(e.company_id) : null, ov = e.id ? ovGet.get(e.id) : null;
   const sc = scoreSignal({
     cat: e.cat, ts: e.ts, companyName: co && co.name, meta, mentions: meta.mentions, tier: meta.tier || (e.verification === 'verified' || e.verification === 'source_verified' ? 'primary' : null),
     model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, released_at: e.mreleased, company_id: e.mcompany, adoption: !['openrouter', 'curated'].includes(e.msrc), ctx_tokens: e.mctx } : null,
   });
+  const final = ov && ov.score != null ? ov.score : sc.score, auto = matters({ cat: e.cat, score: final, companyName: co && co.name, tier: meta.tier || (e.verification === 'verified' || e.verification === 'source_verified' ? 'primary' : null), meta,
+    mentionNames: (meta.mentions || []).map(id => (byId(id) || {}).name),
+    model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, ctx_tokens: e.mctx, adoption: !['openrouter', 'curated'].includes(e.msrc), hoursOld: e.mreleased ? (Date.now() - parseTs(e.mreleased)) / 36e5 : null } : null });
+  const note = ov && ov.matters != null ? (ov.matters || null) : auto;
   return {
     id: e.id, ts: e.ts, cat: e.cat, title: e.title || e.summary, summary: e.summary, detail: e.detail || null, url: e.source || null,
     source_type: e.source_type || null, verification: e.verification || 'aggregator_listed', verification_label: VER_LABEL[e.verification] || VER_LABEL.aggregator_listed, retrieved_at: e.retrieved_at || null,
     company_id: e.company_id || null, company: co ? co.name : null, model_id: e.model_id || null, model: e.mname || null,
-    score: sc.score, importance: sc.importance, parts: sc.parts, why: sc.why, meta,
+    score: final, importance: final >= 80 ? 'Major' : final >= 60 ? 'Important' : 'Normal', parts: sc.parts, why: sc.why, meta,
+    // When an editor set the score, the calculated one is kept so the breakdown can still be shown honestly.
+    ...(final !== sc.score ? { score_edited: true, calculated: sc.score } : {}),
     // True only when the link is on one of the lab's own domains (https), so the page can say "official site" without guessing.
     official_domain: !!(co && e.source && isOfficialUrl(COMPANY[co.id] || co, e.source)),
-    // A short plain-language note for important signals, written by fixed rules from the facts above (null when there is nothing solid to say).
-    matters: matters({ cat: e.cat, score: sc.score, companyName: co && co.name, tier: meta.tier || (e.verification === 'verified' || e.verification === 'source_verified' ? 'primary' : null), meta,
-      mentionNames: (meta.mentions || []).map(id => (byId(id) || {}).name),
-      model: e.model_id ? { likes: e.mlikes, downloads: e.mdownloads, param_count: e.mparams, ctx_tokens: e.mctx, adoption: !['openrouter', 'curated'].includes(e.msrc), hoursOld: e.mreleased ? (Date.now() - parseTs(e.mreleased)) / 36e5 : null } : null }),
+    // A short plain-language note for important signals: written by fixed rules from the facts above (null when there is nothing solid to say), or by an editor.
+    matters: note, ...(ov && ov.matters != null ? { matters_edited: true, matters_auto: auto } : {}),
   };
 }
 
@@ -321,7 +329,7 @@ get(/^\/api\/models\/([^/]+)\/preview$/, ({ m }) => {
   const md = db.prepare('select * from models where id=? and verified=1').get(id);
   if (!md) throw fail(404, 'Model not found.');
   const out = modelOut(md);
-  const sig = signalOut({ ...(db.prepare('select * from events where model_id=? order by ts desc limit 1').get(id) || { cat: 'Model Release', ts: md.released_at || md.rel, company_id: md.company_id, source: md.url }),
+  const sig = signalOut({ ...(db.prepare('select * from events where model_id=? and not exists(select 1 from signal_overrides ov where ov.event_id=events.id and ov.hidden=1) order by ts desc limit 1').get(id) || { cat: 'Model Release', ts: md.released_at || md.rel, company_id: md.company_id, source: md.url }),
     mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens, model_id: id });
   return { model: out, signal: { score: sig.score, importance: sig.importance, why: sig.why.slice(0, 3) }, source_url: md.provider_url || md.url || null };
 });
@@ -333,7 +341,7 @@ get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
   const row = db.prepare('select detail_at from models where id=?').get(id);
   if (!row.detail_at || Date.now() - Date.parse(row.detail_at.replace(' ', 'T') + 'Z') > 36e5) await enrichModel(db, id).catch(() => {});
   const md = db.prepare('select * from models where id=?').get(id), out = modelOut(md);
-  const sig = signalOut({ ...(db.prepare('select * from events where model_id=? order by ts desc limit 1').get(id) || { cat: 'Model Release', ts: md.released_at || md.rel, company_id: md.company_id, source: md.url }),
+  const sig = signalOut({ ...(db.prepare('select * from events where model_id=? and not exists(select 1 from signal_overrides ov where ov.event_id=events.id and ov.hidden=1) order by ts desc limit 1').get(id) || { cat: 'Model Release', ts: md.released_at || md.rel, company_id: md.company_id, source: md.url }),
     mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens, model_id: id });
   // Related research: only links a source states (model card, the provider's own entry, or the paper's abstract).
   const papers = db.prepare(`select mp.arxiv_id,mp.kind,mp.claimed_by,mp.url evidence_url,p.id pid,p.title,p.authors,p.published_at,p.date,p.url,p.source_role,p.last_checked
@@ -353,7 +361,7 @@ get(/^\/api\/models\/([^/]+)$/, async ({ m }) => {
     // Verification is reported separately from discovery: what the evidence says, then where the model was found.
     verification: { status: out.verification, label: VER_LABEL[out.verification], meaning: VER_MEANING[out.verification], last_verified: md.verified_at || null, official_url: md.provider_url || null, evidence: evidenceFor(db, id) },
     discovery: db.prepare('select source,ext_id,url,first_seen,last_seen from model_sources where model_id=? order by first_seen').all(id),
-    events: db.prepare('select * from events where model_id=? order by ts desc limit 20').all(id).map(e => signalOut({ ...e, mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens })),
+    events: db.prepare('select * from events where model_id=? and not exists(select 1 from signal_overrides ov where ov.event_id=events.id and ov.hidden=1) order by ts desc limit 20').all(id).map(e => signalOut({ ...e, mlikes: md.likes, mdownloads: md.downloads, mparams: md.param_count, mreleased: md.released_at, mcompany: md.company_id, msrc: md.source_type, mctx: md.ctx_tokens })),
     results: db.prepare('select r.*,b.name bname,b.ver bver from results r join benchmarks b on b.id=r.bench_id where model_id=? order by date desc').all(id),
     papers, similar, detailFetched: !!md.detail_at,
   };
@@ -480,6 +488,28 @@ function servePublic(req, res, p, q) {
     'Content-Security-Policy': "default-src 'none'; style-src 'self'; frame-ancestors *; base-uri 'none'; form-action 'none'" });
   res.end(pub.embedHtml(items, { base, title: 'AI right now', theme: q.get('theme') }));
 }
+
+// ---------- admin: signal moderation ----------
+const ADMIN_SEL = `select e.*, m.likes mlikes, m.downloads mdownloads, m.param_count mparams, m.released_at mreleased, m.company_id mcompany, m.name mname, m.verification mver, m.source_type msrc, m.ctx_tokens mctx
+  from events e left join models m on m.id=e.model_id`;
+// A signal as an editor sees it: the public fields plus whether it is hidden or edited, who changed it, and what the automatic note would be.
+function adminSignal(e) {
+  const o = signalOut(e), ov = ovGet.get(e.id);
+  return { ...o, hidden: !!(ov && ov.hidden), manual: e.source_type === 'manual', edited: { score: !!o.score_edited, matters: !!o.matters_edited, by: ov ? ov.updated_by : null, at: ov ? ov.updated : null } };
+}
+function adminSignals(q) {
+  const wins = { '24h': '-1 day', '7d': '-7 day', '30d': '-30 day' }, w = wins[q.get('window')] || null, f = q.get('filter') || 'all', cat = q.get('cat'), t = (q.get('q') || '').trim();
+  let where = ' where ' + EV_BASE; const a = [];
+  if (w) where += ` and e.ts>=datetime('now','${w}')`;
+  if (f === 'hidden') where += ' and exists(select 1 from signal_overrides x where x.event_id=e.id and x.hidden=1)';
+  if (f === 'edited') where += ' and exists(select 1 from signal_overrides x where x.event_id=e.id and (x.score is not null or x.matters is not null))';
+  if (f === 'manual') where += " and e.source_type='manual'";
+  if (cat && moderation.CATS.includes(cat)) { where += ' and e.cat=?'; a.push(cat); }
+  if (t) { where += " and (coalesce(e.title,e.summary) like ? escape '\\' or e.source like ? escape '\\')"; a.push(likeOf(t), likeOf(t)); }
+  const { limit, offset } = pageOf(q);
+  return { total: db.prepare('select count(*) c from events e' + where).get(...a).c, items: db.prepare(ADMIN_SEL + where + ' order by e.ts desc, e.id desc limit ? offset ?').all(...a, limit, offset).map(adminSignal) };
+}
+const adminSignalById = id => { const e = db.prepare(ADMIN_SEL + ' where e.id=?').get(id); return e ? adminSignal(e) : null; };
 
 // ---------- admin: source management ----------
 const BUILTIN = new Set(SOURCES.map(x => x[0])), srcInterval = () => Math.max(5, +process.env.INGEST_INTERVAL_MIN || 30);
@@ -832,6 +862,12 @@ http.createServer((req, res) => {
           users: c('users'), models: c('models'), papers: c('papers'), events: c('events'), pendingModels: c('models', 'where verified=0'), pendingPapers: c('papers', 'where verified=0'),
           sources: db.prepare('select * from sources_config').all(), emailsSent: c('notification_log', "where status='sent'"), emailsFailed: c('notification_log', "where status='failed'"),
           emailConfigured: !!process.env.RESEND_API_KEY,
+          // The numbers shown at the top of the admin overview: what the public sees, source health, and when a crawl last worked.
+          live: { models: c('models', 'where verified=1'), papers: c('papers', 'where verified=1'),
+            signals24h: db.prepare("select count(*) c from events e where e.ts>=datetime('now','-1 day') and " + EV_OK).get().c, signals7d: db.prepare("select count(*) c from events e where e.ts>=datetime('now','-7 day') and " + EV_OK).get().c,
+            hidden: c('signal_overrides', 'where hidden=1'), edited: c('signal_overrides', 'where score is not null or matters is not null') },
+          sourceHealth: sourceSummary(sourceRows()),
+          lastCrawl: db.prepare("select max(ts) t from ingestion_log where status in ('ok','unchanged','warning')").get().t || null,
         });
       }
       if (p === '/api/admin/log') { if (!needAdmin()) return; return reply(200, db.prepare('select * from ingestion_log order by ts desc limit 40').all()); }
@@ -850,6 +886,32 @@ http.createServer((req, res) => {
           if (j.action === 'approve') db.prepare(`update ${t} set verified=1 where verified=0`).run(); else db.prepare(`delete from ${t} where verified=0`).run();
         }
         return reply(200, { ok: true, count });
+      }
+      // Signal moderation: list (including hidden), edit score / note / visibility, add one the crawler missed.
+      if (p === '/api/admin/signals' && req.method === 'GET') { if (!needAdmin()) return; return reply(200, adminSignals(q)); }
+      if (p === '/api/admin/signals/update' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        const id = +j.id, e = Number.isInteger(id) && db.prepare('select id from events where id=?').get(id); if (!e) return reply(404, { error: 'No such signal.' });
+        const ch = moderation.parseUpdate(Object.fromEntries(Object.entries(j).filter(([k]) => k !== 'id'))), who = db.prepare('select email from users where id=?').get(uid).email;
+        if (ch.reset) db.prepare('delete from signal_overrides where event_id=?').run(id);
+        else {
+          const cur = db.prepare('select score,matters,hidden from signal_overrides where event_id=?').get(id) || { score: null, matters: null, hidden: 0 }, nx = { ...cur, ...ch };
+          if (nx.score == null && nx.matters == null && !nx.hidden) db.prepare('delete from signal_overrides where event_id=?').run(id);
+          else db.prepare("insert into signal_overrides(event_id,score,matters,hidden,updated_by,updated) values(?,?,?,?,?,datetime('now')) on conflict(event_id) do update set score=excluded.score,matters=excluded.matters,hidden=excluded.hidden,updated_by=excluded.updated_by,updated=excluded.updated").run(id, nx.score, nx.matters, nx.hidden ? 1 : 0, who);
+        }
+        return reply(200, { ok: true, signal: adminSignalById(id) });
+      }
+      if (p === '/api/admin/signals/add' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        const n = moderation.parseNew(j, { companyIds: COMPANIES.map(c => c.id), isOfficial: (c, u) => isOfficialUrl(COMPANY[c], u), now: Date.now() });
+        const dup = db.prepare('select id from events where source=?').get(n.url); if (dup) return reply(409, { error: 'There is already a signal for that link. Find it in the table and edit it.', id: dup.id });
+        const who = db.prepare('select email from users where id=?').get(uid).email;
+        const r = db.prepare("insert into events(sev,ts,org_id,cat,summary,title,source,source_type,verification,meta,company_id,retrieved_at) values('Important',?,'ext',?,?,?,?,'manual',?,?,?,datetime('now'))")
+          .run(n.ts, n.cat, n.summary, n.title, n.url, n.verification, JSON.stringify({ manual: true, added_by: who }), n.company);
+        const id = Number(r.lastInsertRowid);
+        if (n.score != null || n.matters != null) db.prepare('insert into signal_overrides(event_id,score,matters,hidden,updated_by) values(?,?,?,0,?)').run(id, n.score ?? null, n.matters ?? null, who);
+        const ev = db.prepare('select * from events where id=?').get(id); if (ev) await notify(ev).catch(err => console.error('notify failed:', err.message));
+        return reply(200, { ok: true, signal: adminSignalById(id) });
       }
       // Source management: list with health, pause / resume, refresh now, test an address, add, remove.
       if (p === '/api/admin/sources' && req.method === 'GET') { if (!needAdmin()) return; const rows = sourceRows(); return reply(200, { summary: sourceSummary(rows), sources: rows }); }

@@ -95,21 +95,21 @@ const PART_HELP = {
 const DEFAULT_SCORE = { weights: { impact: .2, popularity: .2, technical: .2, relevance: .25, freshness: .15 }, significant: 60, major: 80 };
 // "Why this score": the real weights and thresholds (from the server), what each part contributed, and the evidence behind it, so the number can be checked.
 export const scoreBreakdown = (s, open = false) => {
-  const sc = (state.status && state.status.score) || DEFAULT_SCORE, keys = Object.keys(PART_LABEL), used = keys.filter(k => s.parts[k] != null);
+  const calc = s.calculated ?? s.score, sc = (state.status && state.status.score) || DEFAULT_SCORE, keys = Object.keys(PART_LABEL), used = keys.filter(k => s.parts[k] != null);
   const den = used.reduce((t, k) => t + sc.weights[k], 0) || 1, share = k => sc.weights[k] / den;
   // Whole-number points that add up exactly to the score: round each part down, then give the leftover points to the largest fractions.
   const raw = Object.fromEntries(used.map(k => [k, s.parts[k] * share(k)])), pts = Object.fromEntries(used.map(k => [k, Math.floor(raw[k])]));
-  let left = s.score - used.reduce((t, k) => t + pts[k], 0);
+  let left = calc - used.reduce((t, k) => t + pts[k], 0);
   for (const k of [...used].sort((a, b) => (raw[b] - pts[b]) - (raw[a] - pts[a]))) { if (left <= 0) break; pts[k]++; left--; }
   const skipped = keys.length - used.length;
   return html`<details class="why score-why" ${open ? 'open' : ''}><summary>Why this score <span class="sw-pill imp imp-${s.importance}">${s.score} · ${s.importance}</span></summary>
-  <p class="sw-intro">Each part is rated 0 to 100 from evidence we hold. The score is their weighted average, so a part with no data is skipped, never counted as zero.</p>
+  ${s.score_edited ? html`<p class="sw-edit">The SignalStack team set this score to <b>${s.score}</b>. The calculation below gives <b>${calc}</b>.</p>` : ''}<p class="sw-intro">Each part is rated 0 to 100 from evidence we hold. The score is their weighted average, so a part with no data is skipped, never counted as zero.</p>
   <div class="sw-grid" role="table" aria-label="How the score is built">
     <div class="sw-head" role="row"><span role="columnheader">Part</span><span role="columnheader">Rating</span><span role="columnheader" class="sw-n">Weight</span><span role="columnheader" class="sw-n">Adds</span></div>
     ${keys.map(k => s.parts[k] == null
       ? html`<div class="sw-row skip" role="row"><div class="sw-name"><b>${PART_LABEL[k]}</b><small>${PART_HELP[k]}</small></div><span class="sw-none">No data. Left out.</span></div>`
       : html`<div class="sw-row" role="row"><div class="sw-name"><b>${PART_LABEL[k]}</b><small>${PART_HELP[k]}</small></div><span class="sw-bar"><span class="track"><i data-bar="${s.parts[k]}"></i></span><b class="sw-v">${s.parts[k]}</b></span><span class="sw-n sw-w">${Math.round(share(k) * 100)}%</span><span class="sw-n sw-add">+${pts[k]}</span></div>`)}
-    <div class="sw-total" role="row"><span>Signal Score</span><b>${s.score}</b></div></div>
+    <div class="sw-total" role="row"><span>${s.score_edited ? 'Calculated score' : 'Signal Score'}</span><b>${calc}</b></div></div>
   ${skipped ? html`<p class="fine">${skipped} part${skipped === 1 ? ' has' : 's have'} no data here, so the remaining weights are scaled up to add to 100%.</p>` : html``}
   <div class="sw-scale" aria-label="Where this score sits"><span class="sw-seg n">Normal<small>under ${sc.significant}</small></span><span class="sw-seg i">Important<small>${sc.significant} to ${sc.major - 1}</small></span><span class="sw-seg m">Major<small>${sc.major}+</small></span><i class="sw-mark" data-bar="${s.score}" aria-hidden="true"></i></div>
   ${s.why.length ? html`<p class="sw-evh">What this is based on</p><ul>${s.why.map(w => html`<li>${w}</li>`)}</ul>` : ''}
@@ -118,7 +118,7 @@ export const scoreBreakdown = (s, open = false) => {
 
 // ---------- signal card ----------
 // Where a signal came from (colour-coded) and what kind of thing it is. Both are read from the source type the ingester stored, never guessed.
-const SRC = { huggingface: ['hf', 'Hugging Face'], openrouter: ['or', 'OpenRouter'], curated: ['off', 'Official'], arxiv: ['arx', 'arXiv'], 'github-release': ['gh', 'GitHub'], blog: ['blog', ''] };
+const SRC = { huggingface: ['hf', 'Hugging Face'], openrouter: ['or', 'OpenRouter'], curated: ['off', 'Official'], arxiv: ['arx', 'arXiv'], 'github-release': ['gh', 'GitHub'], blog: ['blog', ''], manual: ['blog', 'SignalStack team'] };
 const TYPE = { huggingface: 'Model', openrouter: 'Model', curated: 'Model', arxiv: 'Paper', 'github-release': 'Release', blog: 'Blog' };
 const TYPE_BY_CAT = { 'Model Release': 'Model', Trending: 'Model', Research: 'Paper', 'Open Source': 'Release', Announcement: 'Blog' };
 const TYPE_ICON = {
@@ -145,6 +145,7 @@ export const provenance = s => {
     case 'github-release': title = lab ? 'Official release on GitHub' : 'Release published on GitHub'; note = lab ? `From ${s.company}’s own GitHub account` : 'From a repository we track; not matched to a lab'; tone = lab ? 'ok' : 'plain'; break;
     case 'huggingface': title = lab && v === 'source_verified' ? 'From the lab’s own Hugging Face account' : 'Community upload on Hugging Face'; note = lab && v === 'source_verified' ? 'Published by the lab itself; not yet matched to its official documentation' : 'Not from a tracked lab'; tone = lab && v === 'source_verified' ? 'blue' : 'plain'; break;
     case 'openrouter': title = 'Listed in the OpenRouter catalogue'; note = 'A third-party catalogue. The provider has not confirmed it here'; tone = 'warn'; break;
+    case 'manual': title = own ? `Official page from ${s.company || 'the lab'}` : 'Added by the SignalStack team'; note = own ? 'Added by hand; the link is on the lab’s own website' : 'Added by hand; the link is not on a lab’s own website'; tone = own ? 'ok' : 'plain'; break;
     case 'blog': title = own ? `Official announcement from ${s.company || 'the lab'}` : v === 'verified' ? 'Official announcement' : 'Post from a tracked feed'; note = own ? 'Published on the lab’s own website' : 'Not on a lab’s own domain'; tone = own ? 'ok' : 'plain'; break;
     default: title = (VER[v] || VER.unverified)[1]; note = ''; tone = v === 'verified' ? 'ok' : 'plain';
   }
@@ -167,7 +168,7 @@ const card = (s, lead) => {
     </header>
     <h3>${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
     ${sum ? html`<p class="sc-sum">${sum}</p>` : ''}
-    ${s.matters ? html`<p class="matters"><b>Why this matters</b>${s.matters} <span class="matters-note">Written from the data, not by AI.</span></p>` : ''}
+    ${s.matters ? html`<p class="matters"><b>Why this matters</b>${s.matters} <span class="matters-note">${s.matters_edited ? 'Written by the SignalStack team.' : 'Written from the data, not by AI.'}</span></p>` : ''}
     ${provBlock(s)}
     <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}<span class="imp imp-${s.importance}">${s.importance}</span></div>
     <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>${qlBtn(s.model_id)}` : ''}${saveBtn('signal', s.id)}</div>
