@@ -217,6 +217,15 @@ export const signalRow = s => {
     ${url ? html`<a class="sr-go" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open original source for ${s.title}" title="Open original source">↗</a>` : ''}</article>`;
 };
 
+// Compact feed row: score, title, source, time and verification status on one line, for fast scanning.
+export const compactRow = s => {
+  const type = signalType(s), [sk, sname] = sourceInfo(s), url = safeUrl(s.url);
+  return html`<article class="crow src-${sk}">${scoreRing(s.score)}
+    <h3 class="cr-t">${s.model_id ? html`<a href="#model/${mid(s.model_id)}">${s.title}</a>` : url ? html`<a href="${url}" target="_blank" rel="noopener noreferrer">${s.title}</a>` : s.title}</h3>
+    <span class="cr-meta"><span class="sc-type">${type}</span><span class="srcb">${sname}</span><time data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time>${verBadge(s.verification)}</span>
+    ${url ? html`<a class="sr-go" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open original source for ${s.title}" title="Open original source">↗</a>` : html`<span class="sr-go off" aria-hidden="true"></span>`}</article>`;
+};
+
 // A missing value reads "Not listed" (dimmed) with the full wording on hover, so a sparse card looks quiet instead of broken.
 const miss = v => (v == null || v === '' || v === NA ? html`<span class="na" title="${NA}">Not listed</span>` : v);
 const CONFIRMED = { verified: 'Confirmed by the provider', source_verified: 'Straight from the publisher' };
