@@ -21,12 +21,12 @@ export async function render() {
   return {
     title: 'Now',
     html: html`<div class="hero-now">${pageHead('Today in AI', `The few things that matter right now, from ${win}, most important first.`, checked(d.lastChecked))}
+      ${d.lead ? html`<section class="top-signal" aria-label="Top signal"><header><h2><span class="live-dot" aria-hidden="true"></span>Top signal</h2><a href="#signals">All signals</a></header>${leadCard(d.lead)}</section>` : ''}
       <p class="snapshot"><span><b>${num(d.counts.last24h)}</b>signals in 24 h</span><span><b>${num(d.counts.significant)}</b>scoring 60 or higher</span><span><b>${num(d.counts.models)}</b>models tracked</span><span><b>${num(d.counts.papers)}</b>paper${d.counts.papers === 1 ? '' : 's'} collected</span></p>
       ${trustBar({ week: d.counts.week, sources: d.counts.sources, lastChecked: d.lastChecked })}
       <p class="guide"><b>Now</b> is the short briefing. <a href="#signals">Signals</a> is the full feed with filters${d.counts.last24h ? html`, ${num(d.counts.last24h)} in the last day` : ''}.</p></div>
       ${none ? empty('Collecting data', 'The first update starts shortly after the server boots and can take a few minutes. Check back soon.', html`<button class="pri" data-action="reload">Refresh</button>`) : ''}
       ${verLegend()}
-      ${d.lead ? html`<section class="blk"><header><h2>Top story</h2><a href="#signals">All signals</a></header>${leadCard(d.lead)}</section>` : ''}
       <section class="blk" id="watching" aria-live="polite"></section>
       ${d.groups.map(g => html`<section class="blk"><header><h2>${TITLE[g.id][g.window === '24h' ? 0 : 1]} <span class="cnt">${num(g.total)}</span></h2><a href="#signals/${encodeURIComponent(SEE_ALL[g.id] + '&window=' + (g.window === '24h' ? '24h' : '7d'))}">See all ${num(g.total)}</a></header>
         <div class="rows-sig">${g.items.map(signalRow)}</div></section>`)}

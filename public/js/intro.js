@@ -5,24 +5,30 @@ import { $, api, html, mount, num } from './lib.js';
 // Shown once per visit (per browser tab session), not once ever: a refresh in the same tab skips it, a new visit plays it again.
 // "Replay it" on the home page always works.
 const SEEN = 'ss_intro_seen';
-export const introSeen = () => { try { return sessionStorage.getItem(SEEN) === '1'; } catch (e) { return false; } };
-const markSeen = () => { try { sessionStorage.setItem(SEEN, '1'); } catch (e) { /* storage unavailable */ } };
+// Returning visitors (seen it once in this browser) skip it; a first visit plays it for about 2.5 seconds, then it closes itself.
+const EVER = 'ss_intro_ever', AUTO_MS = 2600;
+export const introSeen = () => { try { return sessionStorage.getItem(SEEN) === '1' || localStorage.getItem(EVER) === '1'; } catch (e) { return false; } };
+const markSeen = () => { try { sessionStorage.setItem(SEEN, '1'); localStorage.setItem(EVER, '1'); } catch (e) { /* storage unavailable */ } };
 
 export async function showIntro(go) {
   const el = document.createElement('div'); el.id = 'intro'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Welcome to Signalstack');
   document.body.append(el);
   mount(el, html`<div class="intro-stage"><canvas id="universe" aria-hidden="true"></canvas><div class="intro-tip" id="itip"></div></div>
-    <button class="intro-skip" id="iskip">Skip intro</button>
+    <button class="intro-skip" id="iskip">Skip intro <span aria-hidden="true">→</span></button><div class="intro-bar" aria-hidden="true"><i></i></div>
     <div class="intro-copy"><h1>A live, source-checked view of AI models, papers and releases</h1>
     <p>Signalstack reads Hugging Face, arXiv, GitHub, lab blogs and a public model catalogue, and shows how each item is sourced. It does not claim to list every model or paper.</p>
     <div class="intro-stat" id="istat"></div>
     <div class="intro-cta"><button class="pri" id="iexp">Explore the AI Universe →</button><button id="inow">See What’s Happening Now</button></div></div>`);
   let stop = () => {};
-  const close = to => { stop(); markSeen(); el.remove(); document.body.style.overflow = ''; go(to); };
+  let timer = 0;
+  const close = to => { clearTimeout(timer); stop(); markSeen(); el.remove(); document.body.style.overflow = ''; go(to); };
   document.body.style.overflow = 'hidden';
   $('#iskip').onclick = () => close('now'); $('#iexp').onclick = () => close('models'); $('#inow').onclick = () => close('now');
   addEventListener('keydown', function esc(e) { if (e.key === 'Escape' && document.getElementById('intro')) { removeEventListener('keydown', esc); close('now'); } });
   $('#iexp').focus();
+  // Auto-continue to the product after a few seconds.
+  const arm = ms => { clearTimeout(timer); timer = setTimeout(() => { if (document.getElementById('intro')) close('now'); }, ms); };
+  el.style.setProperty('--auto', AUTO_MS + 'ms'); arm(AUTO_MS);
   let companies = [], status = null;
   try { [companies, status] = await Promise.all([api('/companies'), api('/status')]); } catch (e) { /* draw an empty map */ }
   const c = status && status.counts;
