@@ -536,6 +536,7 @@ function prune(db) {
     db.exec(`delete from papers where date<date('now','-${days} day') and (arxiv_id is null or arxiv_id not in (select arxiv_id from model_papers));
       delete from events where ts<datetime('now','-120 day') and model_id is null;
       delete from ingestion_log where ts<datetime('now','-14 day');
+      delete from signal_overrides where event_id not in (select id from events);
       delete from sessions where expires<${Date.now()};delete from password_resets where expires<${Date.now()}`);
   } catch (e) { console.error('Prune failed:', e.message); }
 }

@@ -1,16 +1,27 @@
 // Admin: source health, review queue, users, test email.
-import { api, html, pageHead, $, mount, ago } from '../lib.js';
+import { api, html, pageHead, $, mount, ago, stamp } from '../lib.js';
 import * as sourcesView from './admin-sources.js';
+import * as signalsView from './admin-signals.js';
 import { adminTabs } from './admin-sources.js';
+
+// The numbers at the top: what the public sees, how many sources work, and when a crawl last succeeded.
+const tiles = s => {
+  const h = s.sourceHealth, ok = h.healthy + h.warning, bad = h.failing + h.stale, active = h.total - h.paused;
+  const t = (n, l, sub, href, cls = '') => html`<a class="otile ${cls}" href="${href}"><b>${n}</b><span>${l}</span>${sub ? html`<small>${sub}</small>` : ''}</a>`;
+  return html`<div class="otiles">${t(s.live.models.toLocaleString(), 'Models', '', '#models')}${t(s.live.papers.toLocaleString(), 'Papers', '', '#research')}${t(s.live.signals24h.toLocaleString(), 'Signals, last 24 hours', '', '#admin/signals')}${t(s.live.signals7d.toLocaleString(), 'Signals, last 7 days', s.live.hidden ? `${s.live.hidden} hidden` : '', '#admin/signals')}
+    ${t(ok, 'Sources healthy', `of ${active} active`, '#admin/sources', 'ok')}${t(bad, 'Sources failing', bad ? 'need attention' : 'none right now', '#admin/sources', bad ? 'bad' : '')}${t(s.lastCrawl ? ago(s.lastCrawl) : 'None yet', 'Last successful crawl', s.lastCrawl ? stamp(s.lastCrawl) : '', '#admin/sources')}</div>`;
+};
 
 export async function render(arg = '') {
   if (arg === 'sources') return sourcesView.render();
+  if (arg === 'signals') return signalsView.render();
   const [s, log, pend, users] = await Promise.all([api('/admin/summary'), api('/admin/log'), api('/admin/pending'), api('/admin/users')]);
   const reviewList = (kind, items, label) => html`<div class="panel"><h3>${label} (${items.length})</h3>${items.length ? html`<p class="tags mt"><button class="mini" data-bulk="${kind}" data-bulkact="approve">Approve all</button><button class="mini" data-bulk="${kind}" data-bulkact="reject">Reject all</button></p>` : ''}
     <div class="rows">${items.map(i => html`<div>${i.name || i.title}<p class="tags"><button class="mini" data-rev="${i.id}" data-type="${kind}" data-act="approve">Approve</button><button class="mini" data-rev="${i.id}" data-type="${kind}" data-act="reject">Reject</button></p></div>`)}${items.length ? '' : html`<div class="na">Nothing pending.</div>`}</div></div>`;
   return {
     title: 'Admin',
-    html: html`${adminTabs('overview')}${pageHead('Admin', 'Source health, review queue and users.')}
+    html: html`${adminTabs('overview')}${pageHead('Admin', 'The numbers that matter, then source health, review queue and users.')}
+      ${tiles(s)}
           <section class="blk">
         <header><h2>Database backup</h2></header>
         <p class="fine">Download a copy of your SignalStack database.</p>

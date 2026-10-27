@@ -277,3 +277,50 @@ test('admin sources: health list, pause / resume, refresh, validation, add and r
   assert.strictEqual((await call('/api/admin/sources/remove', 'POST', { id: add.body.source.id }, cookie)).status, 200);
   assert.ok(!(await call('/api/admin/sources', 'GET', null, cookie)).body.sources.some(s => s.id === add.body.source.id));
 });
+
+test('signal moderation: score, Major, note, hide everywhere, reset, manual add; admin-only; overview numbers', async () => {
+  const base = `http://127.0.0.1:${port}`, call = async (path, method, body, cookie) => { const r = await fetch(base + path, { method, headers: { cookie }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  const login = async (email, password) => (await fetch(base + '/api/login', { method: 'POST', body: JSON.stringify({ email, password }) })).headers.get('set-cookie').split(';')[0];
+  assert.strictEqual((await call('/api/admin/signals', 'GET')).status, 401);
+  await fetch(base + '/api/signup', { method: 'POST', body: JSON.stringify({ email: 'plain@b.co', password: 'longenough', accept: true }) });
+  const plain = await login('plain@b.co', 'longenough'); assert.strictEqual((await call('/api/admin/signals', 'GET', null, plain)).status, 403, 'signed in but not an admin');
+  assert.strictEqual((await call('/api/admin/signals/update', 'POST', { id: 1, hidden: true }, plain)).status, 403);
+  const admin = await login('a@b.co', 'longenough');
+  const target = (await api('/api/signals?window=30d')).body.items[0], id = target.id, upd = b => call('/api/admin/signals/update', 'POST', { id, ...b }, admin);
+  const pubHas = async () => (await api('/api/signals?window=30d')).body.items.some(s => s.id === id);
+  // score and Major
+  let s = (await upd({ score: 12 })).body.signal;
+  assert.deepStrictEqual([s.score, s.importance, s.score_edited, s.calculated], [12, 'Normal', true, target.score]);
+  assert.strictEqual((await api('/api/signals?window=30d')).body.items.find(x => x.id === id).score, 12, 'the public sees the edited score');
+  s = (await upd({ score: 85 })).body.signal; assert.strictEqual(s.importance, 'Major');
+  assert.strictEqual((await upd({ score: 101 })).status, 400);
+  // note: edited text, no note, back to automatic
+  s = (await upd({ matters: 'An editor wrote this.' })).body.signal; assert.deepStrictEqual([s.matters, s.matters_edited], ['An editor wrote this.', true]);
+  s = (await upd({ matters: '' })).body.signal; assert.strictEqual(s.matters, null, 'an empty note shows nothing');
+  s = (await upd({ matters: null })).body.signal; assert.ok(!s.matters_edited, 'automatic again');
+  // hide: gone from every public surface, still in the admin table, and can be restored
+  await upd({ hidden: true });
+  assert.ok(!(await pubHas()), '/api/signals');
+  assert.ok(!(await api('/api/v1/signals?window=30d&limit=200')).body.data.some(x => x.id === id), '/api/v1/signals');
+  assert.ok(!(await api('/feed.xml?window=30d')).body.includes(String(target.title).replace(/&/g, '&amp;')) || target.title.length < 4, 'RSS feed');
+  const now = (await api('/api/now')).body; assert.ok(![now.lead, ...now.groups.flatMap(g => g.items), ...now.top].some(x => x && x.id === id), '/api/now');
+  const hid = (await call('/api/admin/signals?window=all&filter=hidden', 'GET', null, admin)).body; assert.ok(hid.items.some(x => x.id === id && x.hidden));
+  await upd({ hidden: false }); assert.ok(await pubHas(), 'restored');
+  // reset removes every edit
+  await upd({ score: 5, matters: 'x y z' }); s = (await upd({ reset: true })).body.signal;
+  assert.deepStrictEqual([s.score, s.score_edited, s.matters_edited], [target.score, undefined, undefined]);
+  assert.strictEqual((await call('/api/admin/signals/update', 'POST', { id: 99999999, hidden: true }, admin)).status, 404);
+  assert.ok(!JSON.stringify((await api('/api/signals?window=30d')).body).includes('a@b.co'), 'editor emails are never public');
+  // add by hand
+  const body = { title: 'OpenAI announces a thing', url: 'https://openai.com/index/a-thing', cat: 'Announcement', company: 'openai', summary: 'Short summary.', matters: 'Why it matters here.' };
+  assert.strictEqual((await call('/api/admin/signals/add', 'POST', { ...body, url: 'javascript:1' }, admin)).status, 400);
+  const add = await call('/api/admin/signals/add', 'POST', body, admin); assert.strictEqual(add.status, 200);
+  const m = add.body.signal; assert.deepStrictEqual([m.manual, m.source_type, m.verification, m.official_domain, m.matters, m.company_id], [true, 'manual', 'source_verified', true, 'Why it matters here.', 'openai']);
+  assert.ok((await api('/api/signals?window=24h')).body.items.some(x => x.id === m.id), 'it appears on the site');
+  assert.strictEqual((await call('/api/admin/signals/add', 'POST', body, admin)).status, 409, 'same link twice');
+  const off = (await call('/api/admin/signals/add', 'POST', { ...body, url: 'https://news.example.com/openai-thing' }, admin)).body.signal; assert.strictEqual(off.verification, 'aggregator_listed', 'a link off the lab’s site is only "found elsewhere"');
+  assert.ok((await call('/api/admin/signals?window=all&filter=manual', 'GET', null, admin)).body.items.length >= 2);
+  // overview numbers
+  const sm = (await call('/api/admin/summary', 'GET', null, admin)).body;
+  assert.ok(sm.live.models >= 2 && sm.live.signals24h >= 2 && sm.live.signals7d >= sm.live.signals24h && sm.sourceHealth.total > 20 && 'healthy' in sm.sourceHealth && 'failing' in sm.sourceHealth);
+});
