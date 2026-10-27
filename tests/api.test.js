@@ -323,4 +323,25 @@ test('signal moderation: score, Major, note, hide everywhere, reset, manual add;
   // overview numbers
   const sm = (await call('/api/admin/summary', 'GET', null, admin)).body;
   assert.ok(sm.live.models >= 2 && sm.live.signals24h >= 2 && sm.live.signals7d >= sm.live.signals24h && sm.sourceHealth.total > 20 && 'healthy' in sm.sourceHealth && 'failing' in sm.sourceHealth);
+  // reports inbox (messages are sent from the public Contact form in the next test file section)
+  await fetch(base + '/api/report', { method: 'POST', body: JSON.stringify({ kind: 'issue', message: 'The Qwen model page shows the wrong size.', contact: 'me@x.co' }) });
+  assert.strictEqual((await call('/api/admin/reports', 'GET')).status, 401);
+  const list = (await call('/api/admin/reports', 'GET', null, admin)).body;
+  assert.ok(list.items.length >= 1 && list.open >= 1);
+  assert.strictEqual((await call('/api/admin/reports/update', 'POST', { id: list.items[0].id, status: 'done' }, admin)).status, 200);
+  assert.ok((await call('/api/admin/reports', 'GET', null, admin)).body.open < list.open);
+  assert.strictEqual((await call('/api/admin/reports/update', 'POST', { id: 9999, status: 'done' }, admin)).status, 404);
+});
+
+test('trust pages: public sources summary, report form validation, honeypot, rate limit and admin inbox', async () => {
+  const base = `http://127.0.0.1:${port}`, call = async (path, method, body, cookie) => { const r = await fetch(base + path, { method, headers: { cookie: cookie || '' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+  const src = await call('/api/sources/public', 'GET');
+  assert.strictEqual(src.status, 200); assert.ok(src.body.total >= 1 && src.body.groups.length >= 1 && src.body.intervalMin > 0 && src.body.groups.every(g => g.label && g.count >= 1));
+  assert.ok(!JSON.stringify(src.body).includes('config') && !JSON.stringify(src.body).includes('http'), 'no addresses or settings are public');
+  assert.strictEqual((await call('/api/report', 'POST', { kind: 'issue', message: 'short' })).status, 400);
+  assert.strictEqual((await call('/api/report', 'POST', { kind: 'issue', message: 'The Qwen model page shows the wrong size.', contact: 'not-an-email' })).status, 400);
+  assert.strictEqual((await call('/api/report', 'POST', { kind: 'issue', message: 'The Qwen model page shows the wrong size.', contact: 'me@x.co' })).status, 201);
+  assert.strictEqual((await call('/api/report', 'POST', { kind: 'issue', message: 'Bot message that should be dropped', website: 'http://spam' })).status, 200, 'honeypot looks successful but stores nothing');
+  for (let i = 0; i < 4; i++) await call('/api/report', 'POST', { kind: 'other', message: 'Another ordinary message number ' + i });
+  assert.strictEqual((await call('/api/report', 'POST', { kind: 'other', message: 'One message too many from this address' })).status, 429);
 });

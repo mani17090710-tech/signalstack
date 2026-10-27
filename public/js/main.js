@@ -17,6 +17,7 @@ import * as extras from './views/extras.js';
 import * as admin from './views/admin.js';
 import * as apidocs from './views/apidocs.js';
 import * as digestView from './views/digest.js';
+import * as trust from './views/trust.js';
 
 const ICON = {
   now: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', models: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>',
@@ -29,6 +30,7 @@ const rawSvg = k => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 const VIEWS = {
   now: [home, 'now'], signals: [signals, 'signals'], models: [models, 'models'], model: [model, 'models'], research: [research, 'research'],
   search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], api: [apidocs, 'you'], digest: [digestView, 'you'], compare: [extras.compare, 'you'],
+  about: [trust.about, ''], methodology: [trust.methodology, ''], sources: [trust.sources, ''], changelog: [trust.changelog, ''], contact: [trust.contact, ''], report: [trust.report, ''],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
 // Phones: five bottom tabs. Search and More are buttons (search opens the field, More opens a sheet with everything else).
@@ -62,9 +64,14 @@ function shell() {
     <div class="netbar" id="netbar" role="status" aria-live="polite" hidden></div>
     <main id="main" tabindex="-1"></main>
     <footer class="trust" id="trust" hidden></footer>
+    <footer class="sitefoot" aria-label="Site links"><div class="sf-cols">
+      <nav aria-label="About Signalstack"><h2>Signalstack</h2><a href="#about">About</a><a href="#methodology">Methodology</a><a href="#sources">Data Sources</a><a href="#changelog">Changelog</a></nav>
+      <nav aria-label="Use the data"><h2>Use the data</h2><a href="#api">API and RSS</a><a href="/feed.xml">RSS feed</a><a href="#digest">Email digest</a></nav>
+      <nav aria-label="Help and legal"><h2>Help</h2><a href="#contact">Contact</a><a href="#report">Report an issue</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></nav></div>
+      <p class="sf-note">Every item links to its original source. Scores are Signalstack’s own estimate. © <span id="sfy"></span> Signalstack.</p></footer>
     <div class="moresheet" id="moresheet" hidden></div>
     <nav class="bottom" aria-label="Main">${NAV.map(([k, l]) => html`<a href="#${k}" data-nav="${k}">${rawSvg(k)}<span>${l}</span></a>`)}<button type="button" id="bsearch">${rawSvg('search')}<span>Search</span></button><button type="button" id="bmore" aria-haspopup="dialog" aria-expanded="false">${rawSvg('more')}<span>More</span></button></nav>`);
-  const sq = $('#sq');
+  const sq = $('#sq'); $('#sfy').textContent = new Date().getFullYear();
   // Typing shows quick suggestions (suggest.js); Enter opens the full results page. Typing never moves the person off the page they are on.
   initSuggest(sq, $('#sf'));
   $('#sf').onsubmit = e => { e.preventDefault(); const v = sq.value.trim(); if (v.length >= 2) { remember(v); location.hash = 'search/' + encodeURIComponent(v); } };

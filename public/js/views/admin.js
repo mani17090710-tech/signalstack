@@ -2,6 +2,7 @@
 import { api, html, pageHead, $, mount, ago, stamp } from '../lib.js';
 import * as sourcesView from './admin-sources.js';
 import * as signalsView from './admin-signals.js';
+import * as reportsView from './admin-reports.js';
 import { adminTabs } from './admin-sources.js';
 
 // The numbers at the top: what the public sees, how many sources work, and when a crawl last succeeded.
@@ -15,6 +16,7 @@ const tiles = s => {
 export async function render(arg = '') {
   if (arg === 'sources') return sourcesView.render();
   if (arg === 'signals') return signalsView.render();
+  if (arg === 'reports') return reportsView.render();
   const [s, log, pend, users] = await Promise.all([api('/admin/summary'), api('/admin/log'), api('/admin/pending'), api('/admin/users')]);
   const reviewList = (kind, items, label) => html`<div class="panel"><h3>${label} (${items.length})</h3>${items.length ? html`<p class="tags mt"><button class="mini" data-bulk="${kind}" data-bulkact="approve">Approve all</button><button class="mini" data-bulk="${kind}" data-bulkact="reject">Reject all</button></p>` : ''}
     <div class="rows">${items.map(i => html`<div>${i.name || i.title}<p class="tags"><button class="mini" data-rev="${i.id}" data-type="${kind}" data-act="approve">Approve</button><button class="mini" data-rev="${i.id}" data-type="${kind}" data-act="reject">Reject</button></p></div>`)}${items.length ? '' : html`<div class="na">Nothing pending.</div>`}</div></div>`;

@@ -534,6 +534,18 @@ const buildSource = async b => {
   return row;
 };
 
+// Public "Data Sources" page: what we read, grouped by kind, and how the checks are going. No addresses, keys or settings are exposed.
+get(/^\/api\/sources\/public$/, () => {
+  const rows = sourceRows().filter(r => r.enabled), groups = {};
+  for (const r of rows) {
+    const g = groups[r.kind] || (groups[r.kind] = { kind: r.kind, label: r.kind_label, count: 0, healthy: 0, examples: [], lastOk: null });
+    g.count++; if (['healthy', 'warning'].includes(r.state)) g.healthy++;
+    if (g.examples.length < 4 && !/^Hugging Face — [A-Za-z0-9-]+ \(/.test(r.label)) g.examples.push(r.label);
+    if (r.last_ok && (!g.lastOk || r.last_ok > g.lastOk)) g.lastOk = r.last_ok;
+  }
+  return { groups: Object.values(groups).sort((a, b) => b.count - a.count), total: rows.length, intervalMin: srcInterval(), lastRun: sourceSummary(rows).lastRun };
+});
+
 // ---------- digests (email per person, Telegram per channel) ----------
 const siteBase = () => (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT).replace(/\/$/, '');
 const digestGroups = (freq, skip = new Set()) => {
@@ -645,6 +657,17 @@ http.createServer((req, res) => {
       const authLimited = () => { if (limited('auth:' + ip, 10)) { reply(429, { error: 'Too many attempts. Wait a minute and try again.' }); return true; } return false; };
       const newSession = id => { const t = cr.randomBytes(24).toString('hex'); db.prepare('insert into sessions values(?,?,?)').run(t, id, Date.now() + 6048e5); return t; };
 
+      // Public: "Report an issue" and "Contact". Rate limited per address; a hidden field catches simple bots.
+      if (p === '/api/report' && req.method === 'POST') {
+        if (limited('report:' + ip, 5, 3600000)) return reply(429, { error: 'Too many messages from this connection. Please try again in an hour.' });
+        if (j.website) return reply(200, { ok: true });
+        const kind = ['issue', 'data', 'contact', 'other'].includes(j.kind) ? j.kind : 'other', message = String(j.message || '').replace(/\r/g, '').trim(), page = String(j.page || '').slice(0, 300), contact = String(j.contact || '').trim().slice(0, 120);
+        if (message.length < 10) return reply(400, { error: 'Please write at least a sentence so we can understand the problem.' });
+        if (message.length > 2000) return reply(400, { error: 'Please keep the message under 2,000 characters.' });
+        if (contact && !/^\S+@\S+\.\S+$/.test(contact)) return reply(400, { error: 'That email address does not look right. Leave it empty if you prefer not to be contacted.' });
+        db.prepare('insert into reports(kind,message,page,contact) values(?,?,?,?)').run(kind, message, page, contact);
+        return reply(201, { ok: true });
+      }
       if (p === '/api/signup' && req.method === 'POST') {
         if (authLimited()) return;
         const email = String(j.email || '').trim().toLowerCase();
@@ -863,6 +886,7 @@ http.createServer((req, res) => {
           sources: db.prepare('select * from sources_config').all(), emailsSent: c('notification_log', "where status='sent'"), emailsFailed: c('notification_log', "where status='failed'"),
           emailConfigured: !!process.env.RESEND_API_KEY,
           // The numbers shown at the top of the admin overview: what the public sees, source health, and when a crawl last worked.
+          reportsOpen: c('reports', "where status='new'"),
           live: { models: c('models', 'where verified=1'), papers: c('papers', 'where verified=1'),
             signals24h: db.prepare("select count(*) c from events e where e.ts>=datetime('now','-1 day') and " + EV_OK).get().c, signals7d: db.prepare("select count(*) c from events e where e.ts>=datetime('now','-7 day') and " + EV_OK).get().c,
             hidden: c('signal_overrides', 'where hidden=1'), edited: c('signal_overrides', 'where score is not null or matters is not null') },
@@ -888,6 +912,13 @@ http.createServer((req, res) => {
         return reply(200, { ok: true, count });
       }
       // Signal moderation: list (including hidden), edit score / note / visibility, add one the crawler missed.
+      if (p === '/api/admin/reports' && req.method === 'GET') { if (!needAdmin()) return; return reply(200, { items: db.prepare('select * from reports order by (status=\'new\') desc, id desc limit 200').all(), open: db.prepare("select count(*) c from reports where status='new'").get().c }); }
+      if (p === '/api/admin/reports/update' && req.method === 'POST') {
+        if (!needAdmin()) return;
+        const id = +j.id, st = j.status === 'done' ? 'done' : 'new';
+        if (!db.prepare('select 1 from reports where id=?').get(id)) return reply(404, { error: 'That message no longer exists.' });
+        db.prepare('update reports set status=? where id=?').run(st, id); return reply(200, { ok: true });
+      }
       if (p === '/api/admin/signals' && req.method === 'GET') { if (!needAdmin()) return; return reply(200, adminSignals(q)); }
       if (p === '/api/admin/signals/update' && req.method === 'POST') {
         if (!needAdmin()) return;

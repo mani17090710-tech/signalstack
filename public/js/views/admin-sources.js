@@ -2,7 +2,7 @@
 import { api, html, pageHead, $, mount, ago, stamp, safeUrl } from '../lib.js';
 import { toast } from '../saved.js';
 
-export const adminTabs = on => html`<nav class="atabs" aria-label="Admin sections"><a href="#admin" class="${on === 'overview' ? 'on' : ''}">Overview</a><a href="#admin/signals" class="${on === 'signals' ? 'on' : ''}">Signals</a><a href="#admin/sources" class="${on === 'sources' ? 'on' : ''}">Sources</a></nav>`;
+export const adminTabs = on => html`<nav class="atabs" aria-label="Admin sections"><a href="#admin" class="${on === 'overview' ? 'on' : ''}">Overview</a><a href="#admin/signals" class="${on === 'signals' ? 'on' : ''}">Signals</a><a href="#admin/sources" class="${on === 'sources' ? 'on' : ''}">Sources</a><a href="#admin/reports" class="${on === 'reports' ? 'on' : ''}">Reports</a></nav>`;
 
 const STATE = { healthy: 'Working', failing: 'Failing', stale: 'Not run recently', warning: 'Working, with warnings', new: 'Not run yet', paused: 'Paused' };
 const NEEDS = ['failing', 'stale', 'warning'];
