@@ -4,7 +4,12 @@ import { api, html, pageHead, signalCard, compactRow, empty, checked, verLegend,
 
 const WINDOWS = [['1h', 'Last hour'], ['6h', '6 hours'], ['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']];
 const SHORT = { '1h': 'last hour', '6h': 'last 6 hours', '24h': 'last 24 hours' };
-const f = { window: '24h', cat: '', company: '', verification: '', sort: 'time' };
+// Filters are remembered in this browser, so coming back does not mean starting over.
+const FK = 'ss_sigfilters', DEF = { window: '24h', cat: '', company: '', verification: '', source: '', minScore: '', q: '', sort: 'time' };
+const loadF = () => { try { const x = JSON.parse(localStorage.getItem(FK)); return { ...DEF, ...(x && typeof x === 'object' ? Object.fromEntries(Object.keys(DEF).filter(k => typeof x[k] === 'string').map(k => [k, x[k]])) : {}) }; } catch (e) { return { ...DEF }; } };
+const saveF = () => { try { localStorage.setItem(FK, JSON.stringify(f)); } catch (e) { /* storage unavailable */ } };
+const SOURCES = [['huggingface', 'Hugging Face'], ['arxiv', 'arXiv'], ['github-release', 'GitHub'], ['openrouter', 'OpenRouter'], ['curated,blog', 'Official lists and blogs'], ['manual', 'SignalStack team']];
+const f = loadF();
 let shown = 0;
 // Detailed cards for research, a compact list for scanning. The choice is remembered in this browser.
 const VIEW = 'ss_feedview';
@@ -13,25 +18,28 @@ const setView = v => { try { localStorage.setItem(VIEW, v); } catch (e) { /* sto
 let mode = getView(), items = [];
 // Types shown in the filter. A value can name several categories (comma-separated), which is how the Now page links to "all models" or "all lab updates".
 const TYPES = [['Model Release,Trending', 'Models'], ['Research', 'Papers'], ['Announcement,Open Source', 'Lab updates (blogs and releases)'], ['Open Source', 'Software releases only'], ['Announcement', 'Blog posts only']];
-const filtered = () => !!(f.cat || f.company || f.verification);
+const filtered = () => !!(f.cat || f.company || f.verification || f.source || f.minScore || f.q);
 
 const cardOf = s => (mode === 'compact' ? compactRow(s) : signalCard(s));
 
 export async function render(arg = '') {
   mode = getView();
   // A link from Now can preselect filters, for example #signals/cat=Research&window=7d
-  if (arg) { const a = new URLSearchParams(arg); f.cat = a.get('cat') || ''; f.company = a.get('company') || ''; f.verification = ''; if (WINDOWS.some(([k]) => k === a.get('window'))) f.window = a.get('window'); if (['time', 'score'].includes(a.get('sort'))) f.sort = a.get('sort'); }
+  if (arg) { const a = new URLSearchParams(arg); f.cat = a.get('cat') || ''; f.company = a.get('company') || ''; f.verification = a.get('verification') || ''; f.source = a.get('source') || ''; f.minScore = a.get('minScore') || ''; f.q = (a.get('q') || '').slice(0, 80); if (WINDOWS.some(([k]) => k === a.get('window'))) f.window = a.get('window'); if (['time', 'score', 'trending'].includes(a.get('sort'))) f.sort = a.get('sort'); saveF(); }
   return {
     title: 'All signals',
     html: html`${pageHead('All signals', html`The full feed: every new model, paper and release as it is detected, newest first. Each card links to its original source. Want just the highlights? <a href="#now">See Now</a>.`, html`<span id="chk"><span class="upd"><i class="upd-dot" aria-hidden="true"></i>Checking…</span></span>`)}
       ${verLegend()}
+      <div class="toolbar tb-search"><input id="fq" type="search" placeholder="Search by model, lab or paper name" aria-label="Search signals" value="${f.q}" maxlength="80" autocomplete="off"></div>
       <p class="fallback" id="fallback" role="status" hidden></p><div class="toolbar"><div class="seg" role="group" aria-label="Time window">${WINDOWS.map(([k, l]) => html`<button data-win="${k}" class="${f.window === k ? 'on' : ''}">${l}</button>`)}</div>
         <div class="seg viewseg" role="group" aria-label="Feed view"><button data-view="detailed" class="${mode === 'detailed' ? 'on' : ''}" aria-pressed="${mode === 'detailed'}">Detailed</button><button data-view="compact" class="${mode === 'compact' ? 'on' : ''}" aria-pressed="${mode === 'compact'}">Compact</button></div></div>
       <div class="toolbar">
-        <select id="fc" aria-label="Type"><option value="">All types</option>${TYPES.map(([k, l]) => html`<option value="${k}" ${f.cat === k ? 'selected' : ''}>${l}</option>`)}</select>
+        <select id="fc" aria-label="Topic"><option value="">All topics</option>${TYPES.map(([k, l]) => html`<option value="${k}" ${f.cat === k ? 'selected' : ''}>${l}</option>`)}</select>
         <select id="fco" aria-label="Lab"><option value="">All labs</option></select>
         <select id="fv" aria-label="Verification"><option value="">Any verification</option>${Object.entries(VER).map(([v, x]) => html`<option value="${v}" ${f.verification === v ? 'selected' : ''}>${x[1]}</option>`)}</select>
-        <select id="fs" aria-label="Sort"><option value="time" ${f.sort === 'time' ? 'selected' : ''}>Newest first</option><option value="score" ${f.sort === 'score' ? 'selected' : ''}>Highest score</option></select></div>
+        <select id="fsrc" aria-label="Source"><option value="">Any source</option>${SOURCES.map(([k, l]) => html`<option value="${k}" ${f.source === k ? 'selected' : ''}>${l}</option>`)}</select>
+        <select id="fmin" aria-label="Minimum score"><option value="">Any score</option>${[40, 60, 80].map(n => html`<option value="${n}" ${f.minScore === String(n) ? 'selected' : ''}>Score ${n}+</option>`)}</select>
+        <select id="fs" aria-label="Sort"><option value="time" ${f.sort === 'time' ? 'selected' : ''}>Newest</option><option value="score" ${f.sort === 'score' ? 'selected' : ''}>Highest signal</option><option value="trending" ${f.sort === 'trending' ? 'selected' : ''}>Trending</option></select></div>
       <p class="checked" id="count" aria-live="polite"></p>
       <div id="list">${skeleton(3)}</div><p class="more"><button id="more" hidden>Show more</button></p>`,
     after(root) {
@@ -43,10 +51,11 @@ export async function render(arg = '') {
       }).catch(() => {});
 
       const load = async add => {
+        if (!add) saveF();
         if (!add) { shown = 0; mount(list, skeleton(3)); count.textContent = ''; }
         else { more.disabled = true; more.textContent = 'Loading…'; }
         try {
-          const q = new URLSearchParams({ window: f.window, sort: f.sort, limit: 25, offset: shown, ...(f.cat && { cat: f.cat }), ...(f.company && { company: f.company }), ...(f.verification && { verification: f.verification }) });
+          const q = new URLSearchParams({ window: f.window, sort: f.sort, limit: 25, offset: shown, ...(f.cat && { cat: f.cat }), ...(f.company && { company: f.company }), ...(f.verification && { verification: f.verification }), ...(f.source && { source: f.source }), ...(f.minScore && { minScore: f.minScore }), ...(f.q && { q: f.q }) });
           let d = await api('/signals?' + q), widened = '';
           // A very short window can look broken. If it is empty, show the latest 7 days instead and say so plainly.
           if (!add && !d.items.length && SHORT[f.window]) {
@@ -82,11 +91,13 @@ export async function render(arg = '') {
           return;
         }
         if (e.target.closest('[data-retry]')) return load();
-        if (e.target.closest('[data-clear]')) { f.cat = f.company = f.verification = ''; ['#fc', '#fco', '#fv'].forEach(id => { $(id, root).value = ''; }); return load(); }
+        if (e.target.closest('[data-clear]')) { f.cat = f.company = f.verification = f.source = f.minScore = f.q = ''; ['#fc', '#fco', '#fv', '#fsrc', '#fmin', '#fq'].forEach(id => { $(id, root).value = ''; }); return load(); }
         if (e.target.id === 'more') load(true);
       };
       const on = (id, k) => { $(id, root).onchange = ev => { f[k] = ev.target.value; load(); }; };
-      on('#fc', 'cat'); on('#fco', 'company'); on('#fv', 'verification'); on('#fs', 'sort');
+      on('#fc', 'cat'); on('#fco', 'company'); on('#fv', 'verification'); on('#fs', 'sort'); on('#fsrc', 'source'); on('#fmin', 'minScore');
+      let qt; $('#fq', root).oninput = ev => { clearTimeout(qt); qt = setTimeout(() => { f.q = ev.target.value.trim().slice(0, 80); load(); }, 300); };
+      // Restore the saved company once the lab list has arrived (it is filled in later).
       load();
     },
   };

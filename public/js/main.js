@@ -18,6 +18,8 @@ import * as admin from './views/admin.js';
 import * as apidocs from './views/apidocs.js';
 import * as digestView from './views/digest.js';
 import * as trust from './views/trust.js';
+import * as signalView from './views/signal.js';
+import { initNewsletter } from './newsletter.js';
 
 const ICON = {
   now: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', models: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>',
@@ -30,7 +32,7 @@ const rawSvg = k => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 const VIEWS = {
   now: [home, 'now'], signals: [signals, 'signals'], models: [models, 'models'], model: [model, 'models'], research: [research, 'research'],
   search: [search, ''], company: [extras.company, 'models'], companies: [extras.companies, 'models'], family: [extras.family, 'models'], saved: [savedMod.view, 'you'], api: [apidocs, 'you'], digest: [digestView, 'you'], compare: [extras.compare, 'you'],
-  about: [trust.about, ''], methodology: [trust.methodology, ''], sources: [trust.sources, ''], changelog: [trust.changelog, ''], contact: [trust.contact, ''], report: [trust.report, ''],
+  signal: [signalView, 'signals'], about: [trust.about, ''], methodology: [trust.methodology, ''], sources: [trust.sources, ''], changelog: [trust.changelog, ''], contact: [trust.contact, ''], report: [trust.report, ''],
   benchmarks: [extras.benchmarks, 'you'], docs: [extras.docs, 'you'], you: [you, 'you'], watchlist: [you.watchlist, 'you'], alerts: [you.alerts, 'you'], admin: [admin, 'you'],
 };
 // Phones: five bottom tabs. Search and More are buttons (search opens the field, More opens a sheet with everything else).
@@ -61,6 +63,7 @@ function shell() {
       <form class="sform" id="sf" role="search"><label class="sr" for="sq">Search</label><input id="sq" type="search" placeholder="Search models, labs, papers" autocomplete="off"><kbd class="slash" aria-hidden="true">/</kbd><button type="button" class="sclose" id="sclose" aria-label="Close search">Cancel</button></form>
       <div class="acct" id="acct"></div>
     </header>
+    <a class="statusbar" id="statusbar" href="#sources" hidden></a>
     <div class="netbar" id="netbar" role="status" aria-live="polite" hidden></div>
     <main id="main" tabindex="-1"></main>
     <footer class="trust" id="trust" hidden></footer>
@@ -94,7 +97,14 @@ function drawAcct() {
 }
 
 // Footer trust line, from the site status. Hidden until the numbers arrive, and on Now (which shows the same facts at the top).
+// Thin always-on strip: when the last good crawl finished, how many sources are watched, and how many are failing.
+function drawStatus() {
+  const c = state.status && state.status.crawl, b = $('#statusbar'); if (!b || !c) return;
+  mount(b, html`<i class="upd-dot" aria-hidden="true"></i><span>Last crawl: <b data-ts="${c.lastOk || ''}">${c.lastOk ? ago(c.lastOk) : 'not yet'}</b></span><span>Sources checked: <b>${c.checked}</b></span><span class="${c.failing ? 'sb-bad' : ''}">Failures: <b>${c.failing}</b></span>`);
+  b.hidden = false;
+}
 function drawTrust() {
+  drawStatus();
   const st = state.status || {}, f = $('#trust'); if (!f || !st.counts) return;
   mount(f, html`${trustBar({ week: st.counts.eventsWeek, sources: st.sources && st.sources.total, lastChecked: st.lastUpdate })}<p>Every item links to its original source and says how far that source can be trusted. <a href="#api">API, RSS and embed</a></p>`); f.hidden = false;
 }
@@ -219,6 +229,6 @@ setInterval(() => $$('[data-ts]').forEach(el => {
 }), 60000);
 // Play the intro when someone arrives at the front door (no link to a specific page), once per visit.
 if (!introSeen() && ['', 'now'].includes(location.hash.replace(/^#\/?/, ''))) showIntro(go);
-initPreview(); savedMod.initSaved();
+initPreview(); savedMod.initSaved(); initNewsletter();
 // Offline-friendly shell: the app opens from the saved copy while a sleeping server wakes up (see sw.js).
 if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => { /* optional */ }));

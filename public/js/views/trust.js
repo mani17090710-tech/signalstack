@@ -31,7 +31,7 @@ export const about = {
 };
 
 export const methodology = {
-  async render() {
+  async render(arg) {
     let src = null; try { src = await api('/sources/public'); } catch (e) { /* the page still explains everything else */ }
     const sc = (state.status && state.status.score) || { weights: { freshness: .15, relevance: .25, technical: .2, popularity: .2, impact: .2 }, significant: 60, major: 80 };
     const W = { freshness: 'Freshness', relevance: 'Relevance', technical: 'Technical importance', popularity: 'Popularity', impact: 'Impact' };
@@ -41,13 +41,15 @@ export const methodology = {
       <div class="prose">
         <h2>1. Finding things</h2>
         <p>Signalstack reads ${src ? html`<b>${num(src.total)}</b> sources` : 'its sources'} automatically${src ? html`, about every <b>${src.intervalMin}</b> minutes` : ''}. See <a href="#sources">Data Sources</a> for the full list by type. Finding something in a feed does not make it official; that is what verification is for.</p>
-        <h2>2. Verification levels</h2>
+        <h2 id="badges">2. Verification levels (the badges)</h2>
         <dl class="vdl">${Object.values(VER).map(v => html`<dt>${v[0]} ${v[1]}</dt><dd>${v[2]}</dd>`)}</dl>
-        <h2>3. The Signal Score</h2>
+        <h2 id="score">3. The Signal Score</h2>
         <p>Each signal gets a score from 0 to 100, the weighted average of the parts below. A part with no data is skipped and the other weights are scaled up, so missing data never counts as zero. Open “Why this score” on any card to see the real numbers for that item.</p>
         <table class="wtable"><thead><tr><th>Part</th><th>What it measures</th><th>Weight</th></tr></thead><tbody>
           ${[['freshness', 'How new it is. Fades over about three days.'], ['relevance', 'How closely it is tied to a lab we track.'], ['technical', 'Model size or context window, or version size of a release.'], ['popularity', 'Likes and downloads, where they are public.'], ['impact', 'Downloads per day since release, where public.']].map(([k, d]) => html`<tr><td>${W[k]}</td><td>${d}</td><td>${Math.round((sc.weights[k] || 0) * 100)}%</td></tr>`)}</tbody></table>
         <p><b>Normal</b> is under ${sc.significant}, <b>Important</b> is ${sc.significant} to ${sc.major - 1}, and <b>Major</b> is ${sc.major} or higher. Closed models have no public likes or downloads, so for them Popularity and Impact read “No public adoption data available yet.” and are left out.</p>
+        <h3 id="freshness">Freshness decay</h3>
+        <p>Freshness starts at 100 when something is published and falls smoothly as it ages: about <b>72</b> after one day, <b>37</b> after three days and <b>10</b> after a week. That is why a day-old release can outrank an older one with a similar score.</p>
         <p>Evidence quality (the verification level of the source) is shown next to the score for transparency. It does not change the number.</p>
         <h2>4. Human corrections</h2>
         <p>The SignalStack team can change a score, mark a signal Major, hide a bad signal, rewrite a note, or add a signal the crawler missed. A changed score shows both the team’s value and the calculated one, a rewritten note says it was written by the team, and a hand-added signal is marked Source Verified only when its link is on the lab’s own website.</p>
@@ -57,6 +59,7 @@ export const methodology = {
         <ul><li>Coverage depends on the sources we watch. Some things will be missed or arrive late.</li><li>The score is our estimate, not an objective measure of quality.</li><li>If a source is down we keep the last good data and show when it was last updated.</li></ul>
         <p>Found a mistake? <a href="#report">Report an issue</a>.</p>
       </div>`,
+      after() { const t = arg && document.getElementById(arg); if (t) requestAnimationFrame(() => t.scrollIntoView({ block: 'start' })); },
     };
   },
 };
@@ -78,6 +81,7 @@ export const sources = {
 
 // What changed and when, in plain words. Newest first.
 const CHANGES = [
+  ['29 Oct 2026', ['Signals: search by name, filters for source, evidence level, topic and minimum score, and sort by Newest, Highest signal or Trending. Your filters are remembered.', 'Every signal has its own shareable page with a preview card. A live status strip shows the last crawl, sources checked and failures.', 'Report a wrong or outdated signal from its card, and a weekly newsletter signup.']],
   ['27 Oct 2026', ['Compact and Detailed views for the Signals feed, a Why trust Signalstack? section, and About, Methodology, Data Sources, Changelog and Contact pages.', 'Saved pages show while the server wakes up, with an “Updating signals…” notice and a Retry button.', 'Phone navigation: Now, Signals, Models, Search and More. Search remembers recent searches and opens with the / key.', 'Clearer score explanations, including evidence quality.', 'Faster intro, a Top signal card on Now, and Signals falls back to the last 7 days when a short window is empty.', 'Admin: signal moderation (score, Major, hide, notes, add by hand), overview numbers, and source management.']],
   ['26 Oct 2026', ['Lab radar: which labs are active, their last signal and the sources we watch for each.', 'Models sorted best first, research lab chips, best-in-row marks on Compare, and a detailed Why this score.']],
   ['25 Oct 2026', ['Email digest (daily or weekly) with live preview and one-click unsubscribe.', 'Public API, RSS feed and an embeddable widget.', '“Why this matters” notes and saved collections.']],
@@ -103,9 +107,9 @@ const form = (kind, page) => html`<form class="panel rform" id="rf" novalidate>
   <p class="fine">Your message is stored so we can fix the problem. We use your email only to reply. See the <a href="/privacy">Privacy Policy</a>.</p>
   <p class="rerr" id="rerr" role="alert" hidden></p>
   <button class="pri" type="submit" id="rsend">Send message</button></form>`;
-const contactView = (title, sub, kind) => ({
+const contactView = (title, sub, kind0) => ({
   async render(arg) {
-    const page = decodeURIComponent(arg || '');
+    const page = decodeURIComponent(arg || ''), kind = /\/s\/\d+/.test(page) ? 'data' : kind0;
     return {
       title,
       html: html`${pageHead(title, sub)}<div id="rbox">${form(kind, page)}</div>`,
