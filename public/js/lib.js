@@ -93,7 +93,7 @@ export const VER = {
   unverified: ['⚪', 'Unverified', 'Not enough reliable evidence on record.'],
 };
 export const verBadge = v => { const k = VER[v] ? v : 'unverified', [i, l, t] = VER[k]; return html`<span class="ver ver-${k}" title="${t}"><span aria-hidden="true">${i}</span> ${l}</span>`; };
-export const verLegend = () => html`<details class="legend"><summary>What do the badges mean?</summary><dl>${Object.entries(VER).map(([k, [i, l, t]]) => html`<dt>${i} ${l}</dt><dd>${t}</dd>`)}</dl><p>Finding a model somewhere (discovery) never makes it Verified. Only evidence from the publisher itself does. Verified describes where the information comes from; it does not mean its claims were independently tested.</p></details>`;
+export const verLegend = () => html`<details class="legend"><summary>What do the badges mean?</summary><dl>${Object.entries(VER).map(([k, [i, l, t]]) => html`<dt>${i} ${l}</dt><dd>${t}</dd>`)}</dl><p>Finding a model somewhere (discovery) never makes it Verified. Only evidence from the publisher itself does. Verified describes where the information comes from; it does not mean its claims were independently tested. <a href="#methodology/badges">Read the methodology</a>.</p></details>`;
 export const FIGURE_SOURCE = { official: 'from the provider', openrouter: 'per OpenRouter listing (third party)' };
 export const figureSource = s => (s ? FIGURE_SOURCE[s] || s : '');
 export const SOURCE_NAME = { huggingface: 'Hugging Face', openrouter: 'OpenRouter catalogue', curated: 'Official list (hand-kept)' };
@@ -189,6 +189,8 @@ export const provBlock = s => {
 // Hover / focus tooltip for the score: what it is built from, in three plain groups.
 const pv = v => (v == null ? 'no data' : Math.round(v));
 const scoreTip = s => `Signal Score ${s.score} of 100\nFreshness ${pv(s.parts.freshness)}: how new it is\nRelevance ${pv(s.parts.relevance)}: how closely it ties to a tracked lab\nImportance: technical ${pv(s.parts.technical)}, impact ${pv(s.parts.impact)}, popularity ${pv(s.parts.popularity)}\nOpen Details for the full breakdown`;
+// Each signal has its own address (a server-rendered page, so shared links preview well).
+const permalink = (s, path) => (path ? '/s/' + s.id : location.origin + '/s/' + s.id);
 const dateOnly = t => { const d = new Date(parse(t)); return isNaN(d) ? '' : d.toISOString().slice(0, 10); };
 
 // Order on every card: title, one-line summary, verification and source, score and age, Open source, then Save / Share / Copy citation.
@@ -202,14 +204,15 @@ const card = (s, lead) => {
       <span class="tipw" tabindex="0" data-tip="${scoreTip(s)}" aria-label="${scoreTip(s).replace(/\n/g, '. ')}">${scoreRing(s.score)}</span>
     </div>
     ${sum ? html`<p class="sc-sum one">${sum}</p>` : ''}
-    <div class="sc-meta2">${verBadge(s.verification)}<span class="srcb">${sname}</span><span class="sc-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(TYPE_ICON[type])}</svg>${type}</span><time class="sc-time" data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time></div>
+    <div class="sc-meta2">${verBadge(s.verification)}<a class="qm" href="#methodology/badges" title="What do the badges and scores mean?" aria-label="How badges and scores work">?</a><span class="srcb">${sname}</span><span class="sc-type"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${raw(TYPE_ICON[type])}</svg>${type}</span><time class="sc-time" data-ts="${s.ts}" title="${stamp(s.ts)}">${ago(s.ts)}</time></div>
     ${lead ? html`${matters}${provBlock(s)}` : ''}
     <div class="sc-act">${url ? html`<a class="btn-src" href="${url}" target="_blank" rel="noopener noreferrer" aria-label="Open source for ${s.title}">Open source <span aria-hidden="true">↗</span></a>` : html`<span class="btn-src off" aria-disabled="true">Source link not available</span>`}
-      <span class="sc-sec">${saveBtn('signal', s.id)}<button type="button" class="mini" data-share data-title="${s.title}" data-url="${url || ''}">Share</button><button type="button" class="mini" data-cite data-title="${s.title}" data-url="${url || ''}" data-by="${sname}${s.company ? ', ' + s.company : ''}" data-date="${dateOnly(s.ts)}">Copy citation</button></span></div>
+      <span class="sc-sec">${saveBtn('signal', s.id)}<button type="button" class="mini" data-share data-title="${s.title}" data-url="${permalink(s)}">Share</button><button type="button" class="mini" data-cite data-title="${s.title}" data-url="${url || ''}" data-by="${sname}${s.company ? ', ' + s.company : ''}" data-date="${dateOnly(s.ts)}">Copy citation</button></span></div>
     <details class="more-details"><summary>Details</summary><div class="md-body">
       ${lead ? '' : html`${matters}${provBlock(s)}`}
       <div class="sc-meta">${s.company ? html`<a class="tag co" href="#company/${s.company_id}">${s.company}</a>` : ''}<span class="imp imp-${s.importance}">${s.importance}</span>${s.model_id ? html`<a class="btn-sec" href="#model/${mid(s.model_id)}">View model</a>${qlBtn(s.model_id)}` : ''}</div>
-      ${scoreBreakdown(s)}</div></details></article>`;
+      ${scoreBreakdown(s)}<p class="fine"><a href="${permalink(s, true)}" rel="canonical">Permalink</a> · <a href="#methodology/score">How scores work</a></p></div></details>
+    <p class="card-foot"><a class="rep-link" href="#report/${encodeURIComponent(permalink(s))}">Wrong source? Outdated? Report</a></p></article>`;
 };
 
 export const signalCard = s => card(s, false);

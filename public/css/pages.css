@@ -92,3 +92,31 @@
   .sc-sum.one { -webkit-line-clamp: 2; line-clamp: 2; }
 }
 @media (max-width: 560px) { .toolbar .seg { flex-wrap: wrap; } }
+
+/* search + filters */
+.tb-search input { width: 100%; max-width: 560px; }
+
+/* card extras: methodology link, report link */
+.qm { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line2); color: var(--mut); font-size: 12px; font-weight: 700; margin-left: -4px; }
+.qm:hover { color: var(--cy); border-color: var(--cy); text-decoration: none; }
+.card-foot { margin: 0; text-align: right; font-size: 12.5px; }
+.rep-link { color: var(--dim); } .rep-link:hover { color: var(--cy); }
+.crumb { margin-bottom: 12px; }
+.perma-h { font-size: clamp(22px, 3.4vw, 30px); line-height: 1.25; flex: 1; min-width: 0; margin: 0; }
+
+/* live status strip */
+.statusbar { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 18px; padding: 6px 16px; font-size: 12.5px; color: var(--mut); background: rgba(8, 14, 30, .7); border-bottom: 1px solid var(--line); }
+.statusbar[hidden] { display: none; }
+.statusbar:hover { text-decoration: none; color: var(--ink); } .statusbar b { color: var(--ink); font-weight: 600; } .statusbar .sb-bad b { color: #f5b942; }
+
+/* newsletter bar */
+.nlbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 26; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: rgba(10, 20, 40, .97); border-top: 1px solid rgba(53, 212, 244, .4); backdrop-filter: blur(8px); animation: nl-up .35s ease; }
+@keyframes nl-up { from { transform: translateY(100%); } }
+.nl-in { max-width: 1080px; margin: 0 auto; display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; position: relative; padding-right: 44px; }
+.nl-t { flex: 1 1 280px; margin: 0; } .nl-t span { color: var(--mut); }
+.nlbar form { display: flex; gap: 8px; flex: 1 1 320px; } .nlbar input[type=email] { flex: 1; min-width: 0; } .nlbar .hp { position: absolute; left: -9999px; }
+.nlbar form button { min-height: 44px; padding: 8px 20px; }
+.nl-x { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 50%; background: none; border: 1px solid var(--line2); color: var(--mut); font-size: 22px; line-height: 1; cursor: pointer; }
+.nl-fine { max-width: 1080px; margin: 6px auto 0; font-size: 12px; color: var(--dim); } .nl-err { color: #ff8585; }
+@media (max-width: 860px) { .nlbar { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding-bottom: 12px; } .nl-in { padding-right: 0; } .nl-x { top: -2px; transform: none; width: 34px; height: 34px; right: -4px; } .nl-t { padding-right: 30px; } .nlbar form { flex: 1 1 100%; } }
+@media (prefers-reduced-motion: reduce) { .nlbar { animation: none; } }

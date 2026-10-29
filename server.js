@@ -25,7 +25,7 @@ const PORT = process.env.PORT || 3000;
 const db = openDb(process.env.DB || 'signalstack.db');
 const PUBLIC = path.join(__dirname, 'public');
 // Version/date of the Terms + Privacy Policy. Bump when they change materially; it is shown on both pages and recorded at signup.
-const LEGAL_VERSION = process.env.LEGAL_VERSION || '2026-10-06';
+const LEGAL_VERSION = process.env.LEGAL_VERSION || '2026-10-29';
 
 // ---------- small helpers ----------
 const hashPw = (pw, salt = cr.randomBytes(16).toString('hex')) => salt + ':' + cr.scryptSync(pw, salt, 64).toString('hex');
@@ -71,6 +71,11 @@ function serveStatic(req, res, p) {
   try { st = fs.statSync(file); if (!st.isFile()) throw new Error('not a file'); } catch (e) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not found'); }
   const etag = '"' + st.size.toString(36) + '-' + Math.floor(st.mtimeMs).toString(36) + '"';
   const ext = path.extname(file);
+  // The app shell carries absolute canonical and social-preview addresses, so it is filled in with this site's own address on the way out.
+  if (file === path.join(PUBLIC, 'index.html')) {
+    res.writeHead(200, { 'Content-Type': MIME['.html'], ...SECURITY, 'Cache-Control': 'no-cache' });
+    return res.end(fs.readFileSync(file, 'utf8').replace(/__BASE__/g, baseUrl(req).replace(/\/$/, '')));
+  }
   const head = { 'Content-Type': MIME[ext] || 'application/octet-stream', ETag: etag, ...SECURITY, 'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=300, must-revalidate' };
   if (req.headers['if-none-match'] === etag) { res.writeHead(304, head); return res.end(); }
   let c = fileCache.get(file);
@@ -163,10 +168,17 @@ function signals(q) {
   if (cat) { const cs = cat.split(',').slice(0, 4); where += ' and e.cat in (' + cs.map(() => '?').join(',') + ')'; args.push(...cs); }
   if (co) { where += ' and e.company_id=?'; args.push(co); }
   if (ver) { where += ' and e.verification=?'; args.push(ver); }
+  const src = (q.get('source') || '').split(',').filter(Boolean).slice(0, 8);
+  if (src.length) { where += ' and e.source_type in (' + src.map(() => '?').join(',') + ')'; args.push(...src); }
   let items = signalRows(where, args, 600).map(signalOut);
   const min = +q.get('minScore') || 0;
   if (min) items = items.filter(s => s.score >= min);
-  if (q.get('sort') === 'score') items.sort((a, b) => b.score - a.score || (a.ts < b.ts ? 1 : -1));
+  // Search by name: every word must appear somewhere in the title, summary, lab or model, in any order.
+  const words = (q.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+  if (words.length) items = items.filter(s => { const h = [s.title, s.summary, s.company, s.model_id].join(' ').toLowerCase(); return words.every(w => h.includes(w)); });
+  const sort = q.get('sort');
+  if (sort === 'score') items.sort((a, b) => b.score - a.score || (a.ts < b.ts ? 1 : -1));
+  else if (sort === 'trending') items = ranked(items);
   return items;
 }
 
@@ -208,6 +220,9 @@ get(/^\/api\/status$/, () => {
     coverage: 'SignalStack tracks official lab releases and models with real traction on Hugging Face, models listed in the OpenRouter catalogue, and papers from selected arXiv categories. It does not claim to list every AI model or paper.',
     lastUpdate: lastChecked(),
     sources: db.prepare("select count(*) total,coalesce(sum(last_status in ('ok','unchanged')),0) healthy from sources_config where enabled=1").get(),
+    // For the status strip: when the last good crawl finished, how many sources are watched, and how many are failing or overdue.
+    crawl: (() => { const rows = sourceRows().filter(r => r.enabled), l = db.prepare("select max(ts) t from ingestion_log where status in ('ok','unchanged','warning')").get().t;
+      return { lastOk: l ? (/[zZ]$|[+-]\d\d:?\d\d$/.test(l) ? l : l.replace(' ', 'T') + 'Z') : null, checked: rows.length, failing: rows.filter(r => ['failing', 'stale'].includes(r.state)).length }; })(),
   };
 });
 
@@ -264,6 +279,12 @@ get(/^\/api\/signals\/facets$/, () => ({
   companies: db.prepare(`select company_id id,count(*) n from events e where ${EV_OK} and company_id is not null and e.ts>=datetime('now','-30 day') group by company_id order by n desc`).all().map(r => ({ ...r, name: byId(r.id) ? byId(r.id).name : r.id })),
   verification: db.prepare(`select verification name,count(*) n from events e where ${EV_OK} and e.ts>=datetime('now','-30 day') group by verification`).all(),
 }));
+
+// One signal by id (for its permalink page). Hidden signals do not exist as far as the public is concerned.
+get(/^\/api\/signals\/(\d+)$/, ({ m }) => {
+  const row = signalRows('and e.id=?', [+m[1]], 1)[0]; if (!row) throw fail(404, 'That signal was not found. It may have been removed.');
+  return signalOut(row);
+});
 
 const MODEL_ORDER = {
   new: 'coalesce(m.released_at,m.rel) desc', popular: 'm.likes desc', downloads: 'm.downloads desc',
@@ -546,6 +567,14 @@ get(/^\/api\/sources\/public$/, () => {
   return { groups: Object.values(groups).sort((a, b) => b.count - a.count), total: rows.length, intervalMin: srcInterval(), lastRun: sourceSummary(rows).lastRun };
 });
 
+// Brevo (free tier): adds a contact to the list. Without BREVO_API_KEY nothing is sent anywhere and the signup is only kept here.
+async function brevoAdd(email) {
+  const key = process.env.BREVO_API_KEY; if (!key) return 'not configured';
+  const list = parseInt(process.env.BREVO_LIST_ID, 10);
+  const r = await fetch('https://api.brevo.com/v3/contacts', { method: 'POST', signal: AbortSignal.timeout(8000), headers: { 'api-key': key, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ email, updateEnabled: true, ...(list ? { listIds: [list] } : {}) }) });
+  return r.ok ? 'synced' : 'error ' + r.status;
+}
+
 // ---------- digests (email per person, Telegram per channel) ----------
 const siteBase = () => (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT).replace(/\/$/, '');
 const digestGroups = (freq, skip = new Set()) => {
@@ -615,6 +644,33 @@ get(/^\/api\/search$/, ({ q }) => {
   };
 });
 
+// ---------- signal permalinks (/s/<id>): a server-rendered page so shared links preview well and can be indexed ----------
+const SRC_NAME = { huggingface: 'Hugging Face', openrouter: 'OpenRouter', curated: 'Official release list', arxiv: 'arXiv', 'github-release': 'GitHub', blog: 'Lab blog', manual: 'SignalStack team' };
+const VER_ICON = { verified: '🟢', source_verified: '🔷', aggregator_listed: '🟡', unverified: '⚪' };
+const ogDesc = t => String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_>#]+/g, ' ').replace(/\s+/g, ' ').trim();
+function servePermalink(req, res, id) {
+  const b = baseUrl(req).replace(/\/$/, ''), head = { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY, 'Cache-Control': 'public, max-age=120' };
+  const row = signalRows('and e.id=?', [id], 1)[0];
+  const shell = (title, desc, canonical, body, extra = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#050a16">
+<title>${esc(title)}</title><meta name="description" content="${esc(desc)}"><link rel="canonical" href="${esc(canonical)}">
+<meta property="og:site_name" content="Signalstack"><meta property="og:type" content="article"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(canonical)}">
+<meta property="og:image" content="${b}/og.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Signalstack: live AI signals, ranked and source-checked">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(desc)}"><meta name="twitter:image" content="${b}/og.png">${extra}
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/cards.css"><link rel="stylesheet" href="/css/pages.css"></head><body>
+<header class="top"><a class="brand" href="/">Signalstack</a><nav class="nav" aria-label="Main"><a href="/#now">Now</a><a href="/#signals">Signals</a><a href="/#methodology">Methodology</a></nav></header><main>${body}</main></body></html>`;
+  if (!row) { res.writeHead(404, { ...head, 'Cache-Control': 'no-store' }); return res.end(shell('Signal not found | Signalstack', 'That signal was not found. It may have been removed.', b + '/', `<div class="empty"><h3>Signal not found</h3><p>That signal doesn’t exist or was removed.</p><a href="/#signals">See all signals</a></div>`, '<meta name="robots" content="noindex">')); }
+  const s = signalOut(row), canonical = `${b}/s/${id}`, src = SRC_NAME[s.source_type] || 'Source', desc = ogDesc(s.matters || s.summary || s.detail || s.title).slice(0, 200) || s.title;
+  const iso = String(s.ts).replace(' ', 'T') + (/[zZ]$|[+-]\d\d:?\d\d$/.test(String(s.ts)) ? '' : 'Z'), link = /^https?:\/\//i.test(s.url || '') ? s.url : '';
+  const body = `<article class="sig sig-lead src-other"><div class="sc-head"><h1 class="perma-h">${esc(s.title)}</h1><span class="score ${s.score >= 80 ? 'hi' : s.score >= 60 ? 'mid' : 'lo'}" role="img" aria-label="Signal Score ${s.score} out of 100"><b>${s.score}</b></span></div>
+    ${ogDesc(s.summary) && ogDesc(s.summary) !== s.title ? `<p class="sc-sum">${esc(ogDesc(s.summary))}</p>` : ''}
+    <div class="sc-meta2"><span class="ver ver-${esc(s.verification)}">${VER_ICON[s.verification] || '⚪'} ${esc(s.verification_label || 'Unverified')}</span><span class="srcb">${esc(src)}</span>${s.company ? `<span>${esc(s.company)}</span>` : ''}<time datetime="${esc(iso)}">${esc(iso.slice(0, 10))}</time><span class="imp imp-${esc(s.importance)}">${esc(s.importance)}</span></div>
+    ${s.matters ? `<p class="matters"><b>Why this matters</b>${esc(s.matters)} <span class="matters-note">${s.matters_edited ? 'Written by the SignalStack team.' : 'Written from the data, not by AI.'}</span></p>` : ''}
+    <div class="sc-act">${link ? `<a class="btn-src" href="${esc(link)}" rel="noopener noreferrer">Open source ↗</a>` : ''}<a class="btn-sec" href="/#signal/${id}">Open in Signalstack</a><a class="btn-sec" href="/#methodology">How scores and badges work</a></div></article>`;
+  res.writeHead(200, head);
+  return res.end(shell(`${s.title} | Signalstack`, desc, canonical, body, `<meta property="article:published_time" content="${esc(iso)}">`));
+}
+
 // ---------- request handling ----------
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'), p = u.pathname, q = u.searchParams;
@@ -627,6 +683,14 @@ http.createServer((req, res) => {
     if (!ss) { res.writeHead(401, h); return res.end('Log in to preview.'); }
     res.writeHead(200, h); return res.end(digestFor(ss.user_id, q.get('freq') === 'weekly' ? 'weekly' : 'daily').html);
   }
+  if (p === '/robots.txt') { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }); return res.end(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${baseUrl(req).replace(/\/$/, '')}/sitemap.xml\n`); }
+  if (p === '/sitemap.xml') {
+    const b = baseUrl(req).replace(/\/$/, ''), rows = db.prepare(`select e.id, max(e.ts) ts from events e where ${EV_OK} and e.ts>=datetime('now','-30 day') group by e.id order by e.ts desc limit 500`).all();
+    res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
+    return res.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${['/', '/#about', '/#methodology'].map(x => `<url><loc>${esc(b + x)}</loc></url>`).join('\n')}\n${rows.map(r => `<url><loc>${b}/s/${r.id}</loc><lastmod>${esc(String(r.ts).replace(' ', 'T').slice(0, 10))}</lastmod></url>`).join('\n')}\n</urlset>\n`);
+  }
+  const pm = p.match(/^\/s\/(\d+)\/?$/);
+  if (pm) { if (limited('perma:' + ip, 300)) { res.writeHead(429, { 'Content-Type': 'text/plain' }); return res.end('Too many requests. Wait a minute and try again.'); } return servePermalink(req, res, +pm[1]); }
   if (p === '/feed.xml' || p === '/embed/now') {
     if (limited('api:' + ip, 300)) { res.writeHead(429, { 'Content-Type': 'text/plain' }); return res.end('Too many requests. Wait a minute and try again.'); }
     try { return servePublic(req, res, p, q); } catch (e) { console.error(e); res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end('Something went wrong.'); }
@@ -657,6 +721,16 @@ http.createServer((req, res) => {
       const authLimited = () => { if (limited('auth:' + ip, 10)) { reply(429, { error: 'Too many attempts. Wait a minute and try again.' }); return true; } return false; };
       const newSession = id => { const t = cr.randomBytes(24).toString('hex'); db.prepare('insert into sessions values(?,?,?)').run(t, id, Date.now() + 6048e5); return t; };
 
+      // Public: weekly newsletter signup. Stored here, and added to the Brevo list when BREVO_API_KEY (and BREVO_LIST_ID) are set.
+      if (p === '/api/subscribe' && req.method === 'POST') {
+        if (limited('sub:' + ip, 6, 3600000)) return reply(429, { error: 'Too many attempts from this connection. Please try again later.' });
+        if (j.website) return reply(200, { ok: true });
+        const email = String(j.email || '').trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120) return reply(400, { error: 'Enter a valid email address.' });
+        const fresh = db.prepare("insert or ignore into subscribers(email,source) values(?,?)").run(email, String(j.source || 'bar').slice(0, 30)).changes > 0;
+        if (fresh) brevoAdd(email).then(r => db.prepare('update subscribers set brevo=? where email=?').run(r, email)).catch(e => db.prepare('update subscribers set brevo=? where email=?').run('error ' + String(e.message).slice(0, 60), email));
+        return reply(200, { ok: true });
+      }
       // Public: "Report an issue" and "Contact". Rate limited per address; a hidden field catches simple bots.
       if (p === '/api/report' && req.method === 'POST') {
         if (limited('report:' + ip, 5, 3600000)) return reply(429, { error: 'Too many messages from this connection. Please try again in an hour.' });
@@ -886,7 +960,7 @@ http.createServer((req, res) => {
           sources: db.prepare('select * from sources_config').all(), emailsSent: c('notification_log', "where status='sent'"), emailsFailed: c('notification_log', "where status='failed'"),
           emailConfigured: !!process.env.RESEND_API_KEY,
           // The numbers shown at the top of the admin overview: what the public sees, source health, and when a crawl last worked.
-          reportsOpen: c('reports', "where status='new'"),
+          reportsOpen: c('reports', "where status='new'"), subscribers: c('subscribers', "where status='active'"),
           live: { models: c('models', 'where verified=1'), papers: c('papers', 'where verified=1'),
             signals24h: db.prepare("select count(*) c from events e where e.ts>=datetime('now','-1 day') and " + EV_OK).get().c, signals7d: db.prepare("select count(*) c from events e where e.ts>=datetime('now','-7 day') and " + EV_OK).get().c,
             hidden: c('signal_overrides', 'where hidden=1'), edited: c('signal_overrides', 'where score is not null or matters is not null') },
@@ -912,6 +986,17 @@ http.createServer((req, res) => {
         return reply(200, { ok: true, count });
       }
       // Signal moderation: list (including hidden), edit score / note / visibility, add one the crawler missed.
+      if (p === '/api/admin/subscribers' && req.method === 'GET') {
+        if (!needAdmin()) return;
+        return reply(200, { count: db.prepare("select count(*) c from subscribers where status='active'").get().c, brevo: !!process.env.BREVO_API_KEY, list: process.env.BREVO_LIST_ID || null, items: db.prepare('select email,ts,source,status,brevo from subscribers order by ts desc limit 200').all() });
+      }
+      if (p === '/api/admin/subscribers.csv' && req.method === 'GET') {
+        if (!needAdmin()) return;
+        const cell = v => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; };
+        const rows = db.prepare("select email,ts,source,status from subscribers order by ts").all();
+        res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="signalstack-subscribers.csv"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return res.end('email,subscribed,source,status\n' + rows.map(r => [r.email, r.ts, r.source, r.status].map(cell).join(',')).join('\n') + '\n');
+      }
       if (p === '/api/admin/reports' && req.method === 'GET') { if (!needAdmin()) return; return reply(200, { items: db.prepare('select * from reports order by (status=\'new\') desc, id desc limit 200').all(), open: db.prepare("select count(*) c from reports where status='new'").get().c }); }
       if (p === '/api/admin/reports/update' && req.method === 'POST') {
         if (!needAdmin()) return;

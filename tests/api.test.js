@@ -300,12 +300,15 @@ test('signal moderation: score, Major, note, hide everywhere, reset, manual add;
   s = (await upd({ matters: null })).body.signal; assert.ok(!s.matters_edited, 'automatic again');
   // hide: gone from every public surface, still in the admin table, and can be restored
   await upd({ hidden: true });
+  assert.strictEqual((await api('/api/signals/' + id)).status, 404, 'permalink API'); assert.strictEqual((await api('/s/' + id)).status, 404, 'permalink page');
+  assert.ok(!(await api('/sitemap.xml')).body.includes('/s/' + id + '<'), 'sitemap');
   assert.ok(!(await pubHas()), '/api/signals');
   assert.ok(!(await api('/api/v1/signals?window=30d&limit=200')).body.data.some(x => x.id === id), '/api/v1/signals');
   assert.ok(!(await api('/feed.xml?window=30d')).body.includes(String(target.title).replace(/&/g, '&amp;')) || target.title.length < 4, 'RSS feed');
   const now = (await api('/api/now')).body; assert.ok(![now.lead, ...now.groups.flatMap(g => g.items), ...now.top].some(x => x && x.id === id), '/api/now');
   const hid = (await call('/api/admin/signals?window=all&filter=hidden', 'GET', null, admin)).body; assert.ok(hid.items.some(x => x.id === id && x.hidden));
   await upd({ hidden: false }); assert.ok(await pubHas(), 'restored');
+  assert.strictEqual((await api('/api/signals/' + id)).status, 200);
   // reset removes every edit
   await upd({ score: 5, matters: 'x y z' }); s = (await upd({ reset: true })).body.signal;
   assert.deepStrictEqual([s.score, s.score_edited, s.matters_edited], [target.score, undefined, undefined]);
@@ -331,6 +334,11 @@ test('signal moderation: score, Major, note, hide everywhere, reset, manual add;
   assert.strictEqual((await call('/api/admin/reports/update', 'POST', { id: list.items[0].id, status: 'done' }, admin)).status, 200);
   assert.ok((await call('/api/admin/reports', 'GET', null, admin)).body.open < list.open);
   assert.strictEqual((await call('/api/admin/reports/update', 'POST', { id: 9999, status: 'done' }, admin)).status, 404);
+  // newsletter list: admin-only, CSV safe against spreadsheet formulas
+  await fetch(base + '/api/subscribe', { method: 'POST', body: JSON.stringify({ email: '=cmd@x.co' }) });
+  assert.strictEqual((await call('/api/admin/subscribers', 'GET')).status, 401);
+  const subs = (await call('/api/admin/subscribers', 'GET', null, admin)).body; assert.ok(subs.count >= 1 && subs.brevo === false);
+  const csv = await (await fetch(base + '/api/admin/subscribers.csv', { headers: { cookie: admin } })).text(); assert.match(csv, /^email,subscribed,source,status\n/); assert.ok(!/^"=/m.test(csv) && /"'=cmd@x.co"/.test(csv), 'formula prefix neutralised');
 });
 
 test('trust pages: public sources summary, report form validation, honeypot, rate limit and admin inbox', async () => {
@@ -350,4 +358,38 @@ test('app shell: service worker and the static loading shell are served', async 
   const base = `http://127.0.0.1:${port}`;
   const sw = await fetch(base + '/sw.js'); assert.strictEqual(sw.status, 200); assert.match(sw.headers.get('content-type'), /javascript/); assert.match(await sw.text(), /ss-shell/);
   const html = await (await fetch(base + '/')).text(); assert.match(html, /Waking up the signal engine/); assert.match(html, /class="boot"/);
+});
+
+
+test('discovery and sharing: search/source/min score/trending filters, permalinks with social tags, sitemap, status strip data, newsletter signup', async () => {
+  const base = `http://127.0.0.1:${port}`, get = async p => { const r = await fetch(base + p); const t = await r.text(); let b = t; try { b = JSON.parse(t); } catch (e) { /* html or xml */ } return { status: r.status, body: b, headers: r.headers }; };
+  const all = (await get('/api/signals?window=30d&limit=100')).body.items; assert.ok(all.length >= 2);
+  const first = all[0], word = String(first.title).split(/\s+/).find(w => w.length > 3) || first.title;
+  const byName = (await get('/api/signals?window=30d&q=' + encodeURIComponent(word))).body.items; assert.ok(byName.length >= 1 && byName.every(x => [x.title, x.summary, x.company, x.model_id].join(' ').toLowerCase().includes(word.toLowerCase())));
+  assert.strictEqual((await get('/api/signals?window=30d&q=zzzqqxx')).body.total, 0);
+  const types = [...new Set(all.map(x => x.source_type).filter(Boolean))]; assert.ok(types.length >= 1);
+  const bySrc = (await get('/api/signals?window=30d&source=' + types[0])).body.items; assert.ok(bySrc.length >= 1 && bySrc.every(x => x.source_type === types[0]));
+  assert.ok((await get('/api/signals?window=30d&minScore=101')).body.total === 0);
+  const hi = (await get('/api/signals?window=30d&sort=score')).body.items.map(x => x.score); assert.deepStrictEqual(hi, [...hi].sort((a, b) => b - a));
+  assert.ok((await get('/api/signals?window=30d&sort=trending')).body.items.length >= 1);
+  // permalink API and page
+  const one = (await get('/api/signals/' + first.id)); assert.strictEqual(one.status, 200); assert.strictEqual(one.body.id, first.id);
+  assert.strictEqual((await get('/api/signals/99999999')).status, 404);
+  const page = await get('/s/' + first.id); assert.strictEqual(page.status, 200); const h = page.body;
+  assert.ok(h.includes(`<link rel="canonical" href="http://127.0.0.1:${port}/s/${first.id}">`), 'canonical');
+  for (const t of ['og:title', 'og:description', 'og:image', 'og:url', 'twitter:card', 'twitter:image']) assert.ok(h.includes(t), t);
+  assert.ok(!h.includes('<script'), 'no scripts on the permalink page'); assert.ok(h.includes('Open source'));
+  const miss = await get('/s/99999999'); assert.strictEqual(miss.status, 404); assert.ok(miss.body.includes('noindex'));
+  const idx = (await get('/')).body; assert.ok(idx.includes(`rel="canonical" href="http://127.0.0.1:${port}/"`) && idx.includes('og:image') && !idx.includes('__BASE__'));
+  assert.strictEqual((await fetch(base + '/og.png')).headers.get('content-type'), 'image/png');
+  const sm = await get('/sitemap.xml'); assert.ok(sm.body.includes('<urlset') && sm.body.includes('/s/' + first.id)); assert.ok((await get('/robots.txt')).body.includes('Sitemap:'));
+  // status strip data
+  const st = (await get('/api/status')).body.crawl; assert.ok(st && typeof st.checked === 'number' && typeof st.failing === 'number' && 'lastOk' in st);
+  // newsletter signup
+  const post = (path, b) => fetch(base + path, { method: 'POST', body: JSON.stringify(b) });
+  assert.strictEqual((await post('/api/subscribe', { email: 'nope' })).status, 400);
+  assert.strictEqual((await post('/api/subscribe', { email: 'reader@x.co' })).status, 200); assert.strictEqual((await post('/api/subscribe', { email: 'reader@x.co' })).status, 200, 'twice is fine');
+  assert.strictEqual((await post('/api/subscribe', { email: 'bot@x.co', website: 'http://spam' })).status, 200, 'honeypot looks successful');
+  for (let i = 0; i < 6; i++) await post('/api/subscribe', { email: `r${i}@x.co` });
+  assert.strictEqual((await post('/api/subscribe', { email: 'late@x.co' })).status, 429);
 });
